@@ -31,6 +31,9 @@ jobs:
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
 
+      - name: Inject spark token
+        run: sed -i "s/__SPARK_TOKEN__/${{ secrets.SPARK_TOKEN }}/" core/src/main/java/spark/SparkInit.java
+
       - name: Build release
         run: |
           chmod +x gradlew
