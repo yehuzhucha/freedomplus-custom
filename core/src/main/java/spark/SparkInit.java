@@ -81,6 +81,8 @@ public class SparkInit implements IXposedHookLoadPackage {
     private static final String ME_UID = "111188513589";
 
     private static volatile boolean running = false;
+    /** 云端配置快照（sendMode / diag 等运行时开关） */
+    private static volatile JSONObject CFG = null;
     // 采集队列：hook 里只入队（微秒级），重活交给后台线程 —— 绝不在 UI 线程做反射
     private static final java.util.concurrent.ConcurrentLinkedQueue<Object[]> QUEUE =
             new java.util.concurrent.ConcurrentLinkedQueue<Object[]>();
@@ -226,6 +228,7 @@ public class SparkInit implements IXposedHookLoadPackage {
             progress("after_wait", "60 秒等待结束，开始拉配置");
             JSONObject cfg = fetchConfig();
             if (cfg == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
+            CFG = cfg;
             if (!cfg.optBoolean("enabled", true)) { log("云端开关是关的，跳过"); progress("skip", "云端开关关闭"); return; }
 
             String text = "[续火花吧]";
@@ -320,9 +323,21 @@ public class SparkInit implements IXposedHookLoadPackage {
         Object builder = XposedHelpers.callMethod(beanSvc, M_NEWBLD);
         progress("step", "builder ok");
 
+        // 诊断模式：把真实方法清单上报，之后靠改云端配置就能调策略，不用重新编译
+        if (CFG != null && CFG.optBoolean("diag", false)) {
+            dumpMethods("builder", builder.getClass());
+            dumpMethods("client", client.getClass());
+            dumpMethods("center", center.getClass());
+        }
+
         // 36.8.0：会话查询会死锁（getConversationListModel / getConversation 调用不返回），
         // 改成直接用会话ID字符串设置 —— 30.9.0 时代就是这么发的（builder.LIZ(会话ID)）。
-        setConversationById(builder, conversationId);
+        String sendMode = CFG == null ? "string" : CFG.optString("sendMode", "string");
+        if ("conversation".equals(sendMode)) {
+            setConversation(client, center, builder, conversationId);
+        } else {
+            setConversationById(builder, conversationId);
+        }
         XposedHelpers.callMethod(builder, M_MSGTYPE, TYPE_TEXT);
         // 内容必须是 JSON（实测 status=2 成功；纯文字反而渲染不出来）
         String content = "{\"text\":" + jsonString(text) + ",\"type\":700}";
@@ -382,6 +397,29 @@ public class SparkInit implements IXposedHookLoadPackage {
             try { m.setAccessible(true); return m.invoke(client); } catch (Throwable ignored) { }
         }
         return null;
+    }
+
+    /** 把类的全部方法名+签名分片上报到服务器 */
+    private void dumpMethods(String tag, Class<?> clz) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (java.lang.reflect.Method m : clz.getDeclaredMethods()) {
+                StringBuilder p = new StringBuilder();
+                for (Class<?> t : m.getParameterTypes()) {
+                    if (p.length() > 0) p.append(",");
+                    p.append(t.getSimpleName());
+                }
+                sb.append(m.getName()).append("(").append(p).append(")->")
+                        .append(m.getReturnType().getSimpleName()).append(" ");
+            }
+            String all = sb.toString();
+            int chunk = 1200;
+            for (int i = 0; i < all.length(); i += chunk) {
+                progress("diag", tag + "[" + (i / chunk) + "]: " + all.substring(i, Math.min(all.length(), i + chunk)));
+            }
+        } catch (Throwable t) {
+            progress("diag", tag + " dump 失败: " + t);
+        }
     }
 
     /** 直接用会话ID字符串设置 builder（避开会死锁的会话模型查询） */
