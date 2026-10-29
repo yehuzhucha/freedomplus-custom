@@ -55,12 +55,14 @@ public class SparkInit implements IXposedHookLoadPackage {
     private static final String PKG   = "com.ss.android.ugc.aweme";
 
     private static final String DIR   = "/sdcard/Download";
-    private static final String OFF   = DIR + "/spark.off";
-    private static final String LOGF  = DIR + "/spark.log";
-    private static final String LOCK  = DIR + "/spark.lock";
-    private static final String DAYF  = DIR + "/spark.day";
-    private static final String SENTF = DIR + "/spark-sent.json";   // 当天已发送的好友（逐条落盘，防重发）
-    private static final String IDSF  = DIR + "/spark-ids.json";
+    // 这些路径会被 redirectToAppDir() 改成 App 私有外部目录（Android 13+ 写不了 /sdcard/Download，
+    // 导致「已发记录」落盘失败 -> 每次重开抖音都从 1/10 重发，好友收到重复消息）
+    private static volatile String OFF   = DIR + "/spark.off";
+    private static volatile String LOGF  = DIR + "/spark.log";
+    private static volatile String LOCK  = DIR + "/spark.lock";
+    private static volatile String DAYF  = DIR + "/spark.day";
+    private static volatile String SENTF = DIR + "/spark-sent.json";
+    private static volatile String IDSF  = DIR + "/spark-ids.json";
 
     private static final String CLS_MGR   = "X.0uEM";
     private static final String FLD_MGR   = "LIZ";
@@ -198,8 +200,15 @@ public class SparkInit implements IXposedHookLoadPackage {
         try {
             File ext = app.getExternalFilesDir(null);
             if (ext != null) {
-                File f = new File(ext, "spark.log");
-                LOG_PATH = f.getAbsolutePath();
+                String base = ext.getAbsolutePath();
+                OFF = base + "/spark.off";
+                LOGF = base + "/spark.log";
+                LOCK = base + "/spark.lock";
+                DAYF = base + "/spark.day";
+                SENTF = base + "/spark-sent.json";
+                IDSF = base + "/spark-ids.json";
+                LOG_PATH = LOGF;
+                log("数据目录: " + base);
             }
         } catch (Throwable ignored) { }
         if (new File(OFF).exists()) { log("关停开关存在（" + OFF + "），跳过"); return; }
