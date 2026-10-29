@@ -241,10 +241,10 @@ public class SparkInit implements IXposedHookLoadPackage {
         try {
             log("★ 今天第一次启动抖音，开始续火花");
             progress("start", "今日首次启动");
-            log("等 15 秒让进程稳定…");
-            Thread.sleep(15000L);
+            log("等 60 秒让 IM 长连接就绪…");
+            Thread.sleep(60000L);
 
-            progress("after_wait", "15 秒等待结束，开始拉配置");
+            progress("after_wait", "60 秒等待结束，开始拉配置");
             JSONObject cfg = fetchConfig();
             if (cfg == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
             CFG = cfg;
