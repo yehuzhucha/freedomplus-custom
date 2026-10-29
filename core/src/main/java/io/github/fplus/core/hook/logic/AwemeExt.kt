@@ -25,13 +25,14 @@ suspend fun Aweme.cityInfo(): String {
 
     return withContext(Dispatchers.IO) {
         runCatching {
-            val result = KHttpUtils.get("http://api.ip33.com/Area_Code/GetArea/?code=$code")
+            // api.ip33.com 已失效（DNS 都解析不出来），改走自建中转
+            val result = KHttpUtils.get("https://www.ccios.de/area/?code=$code")
             val areaJson = result.parseJSON()
             val province = areaJson.getStringOrDefault("province")
             val city = areaJson.getStringOrDefault("city")
             val county = areaJson.getStringOrDefault("county")
 
-            "$province $city $county".trim()
+            "$province $city $county".trim().ifEmpty { "未知（code=$code）" }
         }.getOrElse {
             XplerLog.e(it)
             "获取失败"
