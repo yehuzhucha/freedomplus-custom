@@ -530,6 +530,30 @@ object DexkitBuilder {
             }
             longPressEventClazz = longPressEvent.instance("longPressEvent")
 
+            // 36.x 兜底：上面依赖 40.6.0 的混淆接口名 X.0w4F，36.8.0 不存在。
+            // 改用「Aweme 字段 + Context 字段 + (View, MotionEvent) 方法」结构化定位。
+            if (longPressEventClazz == null) {
+                val fallback = bridge.findClass {
+                    matcher {
+                        addField {
+                            type = "com.ss.android.ugc.aweme.feed.model.Aweme"
+                        }
+                        addField {
+                            type = "android.content.Context"
+                        }
+                        methods {
+                            add {
+                                paramTypes = listOf(
+                                    "android.view.View",
+                                    "android.view.MotionEvent",
+                                )
+                            }
+                        }
+                    }
+                }
+                longPressEventClazz = fallback.instance("longPressFallback")
+            }
+
             // 40.6.0 无法恢复：已穷举证明全库不存在 (View, MotionEvent, MotionEvent, MotionEvent)，
             // 也不存在 (View, MotionEvent, MotionEvent)。三连 MotionEvent 只出现在 classes28 的 6 个类
             // （AbsPressTapPresenter / SearchVideoView / LinearLayoutForSlidesPhotos / SearchTouchActionView
@@ -555,6 +579,19 @@ object DexkitBuilder {
                 }
             }
             doubleClickEventClazz = doubleClickEvent.instance("doubleClickEvent")
+
+            // 36.x 兜底：36.8.0 全库不存在 (View, MotionEvent×3) 的四参方法，
+            // 但 handleDoubleClick 这个方法名未混淆，按名字定位即可。
+            if (doubleClickEventClazz == null) {
+                val byName = bridge.findClass {
+                    matcher {
+                        methods {
+                            add { name = "handleDoubleClick" }
+                        }
+                    }
+                }
+                doubleClickEventClazz = byName.instance("doubleClickByName")
+            }
 
             // 40.6.0 适配：字符串 "normal" 在目标类的字符串表中已消失（旧版有），
             // 这是原 matcher 唯一失效原因。去掉后仍可唯一定位到

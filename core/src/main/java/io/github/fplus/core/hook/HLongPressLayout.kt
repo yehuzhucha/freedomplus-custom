@@ -414,5 +414,20 @@ class HLongPressLayout : BaseHook() {
                     }
                 }
         }
+
+        // 36.x 兜底：36.8.0 上没有四参方法，按方法名 handleDoubleClick 拦截
+        DexkitBuilder.doubleClickEventClazz?.also { clz ->
+            runCatching {
+                lparam.hookClass(clz).methodAllByName("handleDoubleClick") {
+                    onBefore {
+                        if (!config.isDoubleClickType)
+                            return@onBefore
+
+                        if (config.doubleClickType == 1)
+                            setResultVoid()
+                    }
+                }
+            }.onFailure { XplerLog.e(it) }
+        }
     }
 }
