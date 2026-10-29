@@ -7,6 +7,33 @@
 
 ---
 
+## 36.8.0 适配（2026-10-29）
+
+目标：让内置模块在抖音 36.8.0 上恢复「长按菜单 / 双击不点赞 / 视频信息 / 无水印下载 / 续火花」。
+
+### 长按菜单
+- `OnLongPressInterceptListener.onLongPressIntercept(float,float)` 返回 **boolean**，原先调 `setResultVoid()` 等于「没拦截」→ 改为 `setResult(true)`。
+- 长按面板实际由 `FeedLongPressLayoutPresenter` 内部的另一个 `(float,float)->void` 回调弹出（不是 `OnLongPressInterceptListener`）。改为运行时扫描 `LongPressLayout` 字段，命中带该签名的对象就 hook，**不依赖混淆类名**。
+- 原生面板只在「模块菜单真正弹出」的那一半拦截，另一半放行给抖音原生菜单。
+
+### 双击不点赞
+- 真正的点赞入口是 `BaseListFragmentPanel.handleBigDiggViewClick(MotionEvent, IFeedViewHolder, Aweme)`，直接 hook 它（基类是 abstract，子类不重写）。
+- 类名未混淆，按全名加载，不再依赖 DexKit 猜测。
+
+### 视频信息
+- `aweme` 从 `FeedLongPressLayoutPresenter.onBindSafe` 抓取并静态共享，另加视图层级兜底。
+- `api.ip33.com` 已失效（DNS 都解析不出来），属地查询改走自建中转 `https://www.ccios.de/area/?code=<city>`。
+
+### 续火花
+- **会话查询在 36.8.0 上会挂**：`getConversationListModel()` 返回 null 甚至不返回，`waitConversation` 等满 180 秒后抛「会话未出现在本地模型」。
+  → 不再查会话，直接用 `builder.conversationId(String)` 设置（30.9.0 时代的老做法）。
+- Android 13+ 抖音没有 `MANAGE_EXTERNAL_STORAGE`，`/sdcard/Download` 写不进去：
+  日志、已发记录、今日标记、锁文件统一改到 `getExternalFilesDir(null)`，**否则每次重开抖音都会重发一遍**。
+- 提速：启动等待 60s→10s，消息状态轮询 60s→12s，全员已发直接跳过。
+- `sendMode` / `diag` 改为云端配置驱动，改发送策略不必重新编译 APK。
+
+---
+
 ## v1.3.9
 
 ### 修复
