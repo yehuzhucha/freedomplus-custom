@@ -199,7 +199,7 @@ public class SparkInit implements IXposedHookLoadPackage {
             File lf = new File(LOCK);
             if (lf.exists()) {
                 long age = (System.currentTimeMillis() - lf.lastModified()) / 1000L;
-                if (age < 1800) { log("已有实例在跑（锁 " + age + " 秒前），退出"); return; }
+                if (age < 300) { log("已有实例在跑（锁 " + age + " 秒前），退出"); return; }
             }
             writeFile(LOCK, String.valueOf(System.currentTimeMillis()));
         } catch (Throwable ignored) { }
@@ -267,6 +267,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                     markSent(cid);
                     ok++;
                     log("(" + (i + 1) + "/" + targets.size() + ") 已提交: " + cid);
+                    progress("send_ok", (i + 1) + "/" + targets.size() + " " + cid);
                 } catch (Throwable t) {
                     fail++;
                     log("(" + (i + 1) + "/" + targets.size() + ") 失败: " + cid + " -> " + t);
