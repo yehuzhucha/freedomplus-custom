@@ -547,7 +547,7 @@ object DexkitBuilder {
                     runCatching { cd.getInstance(lparam.classLoader) }.getOrNull()
                 }
                 KLogCat.tagI(TAG, "found-class[longPressList]: ${longPressEventClazzList.map { it.name }}")
-            }.onFailure { XplerLog.e(it) }
+            }.onFailure { KLogCat.tagE(TAG, "longPressList: ${it.message}") }
 
             // 36.x 兜底：上面依赖 40.6.0 的混淆接口名 X.0w4F，36.8.0 不存在。
             // 改用「Aweme 字段 + Context 字段 + (View, MotionEvent) 方法」结构化定位。
