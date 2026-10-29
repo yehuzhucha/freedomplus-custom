@@ -533,21 +533,18 @@ object DexkitBuilder {
             // 36.x 兜底：上面依赖 40.6.0 的混淆接口名 X.0w4F，36.8.0 不存在。
             // 改用「Aweme 字段 + Context 字段 + (View, MotionEvent) 方法」结构化定位。
             if (longPressEventClazz == null) {
+                // 36.8.0 实测：回调接口名未混淆 —— com.ss.android.ugc.aweme.feed.listener.OnLongPressInterceptListener
+                // （LongPressLayout 里 setInterceptListener / setHighPriorityLongPressIntercept 等都用它）
                 val fallback = bridge.findClass {
                     matcher {
+                        interfaces {
+                            add { className = "com.ss.android.ugc.aweme.feed.listener.OnLongPressInterceptListener" }
+                        }
                         addField {
                             type = "com.ss.android.ugc.aweme.feed.model.Aweme"
                         }
                         addField {
                             type = "android.content.Context"
-                        }
-                        methods {
-                            add {
-                                paramTypes = listOf(
-                                    "android.view.View",
-                                    "android.view.MotionEvent",
-                                )
-                            }
                         }
                     }
                 }
@@ -597,6 +594,16 @@ object DexkitBuilder {
                     }
                 }
                 doubleClickEventClazz = byName.instanceFirst("doubleClickByName")
+            }
+
+            // 36.8.0 实测：类名未混淆，直接按全名加载最稳
+            //   com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel
+            //   handleDoubleClick(MotionEvent) -> handleDoubleClickInner -> handleBigDiggViewClick（点赞在这里）
+            if (doubleClickEventClazz == null) {
+                doubleClickEventClazz = runCatching {
+                    lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel")
+                }.getOrNull()
+                KLogCat.tagI(TAG, "found-class[doubleClickHardcoded]: ${doubleClickEventClazz?.name}")
             }
 
             // 40.6.0 适配：字符串 "normal" 在目标类的字符串表中已消失（旧版有），

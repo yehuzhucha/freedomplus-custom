@@ -372,7 +372,9 @@ class HLongPressLayout : BaseHook() {
 
                         // 长按上半部分唤起模块设置, 同时拦截抖音原生长按弹窗
                         if (config.isLongPressSetting && y < screenSize.height / 2) {
-                            setResultVoid()
+                            // 36.8.0：OnLongPressInterceptListener.onLongPressIntercept 返回 boolean，
+                            // 必须 setResult(true) 才算"拦截成功"，setResultVoid() 会当成未拦截。
+                            setResult(true)
                             return@onBefore
                         }
 
@@ -386,7 +388,7 @@ class HLongPressLayout : BaseHook() {
                         // 清爽模式菜单的拦截区改为下半。
                         // 36.x：只要清爽模式开启，全屏都拦截原生面板，避免"模块菜单 + 原生菜单"双弹。
                         if (config.isNeatMode)
-                            setResultVoid()
+                            setResult(true)
                     }
                 }
         }
