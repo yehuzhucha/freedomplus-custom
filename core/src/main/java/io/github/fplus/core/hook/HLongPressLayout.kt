@@ -42,6 +42,10 @@ class HLongPressLayout : BaseHook() {
          */
         private const val PENETRATE_TOUCH_RELATIVE_LAYOUT =
             "com.ss.android.ugc.aweme.feed.ui.PenetrateTouchRelativeLayout"
+
+        /** 36.8.0：当前视频。onBindSafe 里刷新，跨 hook 实例共享（静态，避免各实例各存一份） */
+        @Volatile
+        var currentAweme: Aweme? = null
     }
     private val config
         get() = ConfigV1.get()
@@ -213,8 +217,45 @@ class HLongPressLayout : BaseHook() {
         showOptionsMenu(holderRootView)
     }
 
+    /**
+     * 兜底：从视图层级里把 aweme 挖出来。
+     * 顺序：祖先 View 的字段 -> 字段里带 ViewHolder 的对象 -> 再下钻一层。
+     */
+    private fun resolveAwemeFromView(view: View): Aweme? {
+        var cur: View? = view
+        var depth = 0
+        while (cur != null && depth < 10) {
+            runCatching {
+                cur!!.javaClass.declaredFields.forEach { f ->
+                    runCatching {
+                        f.isAccessible = true
+                        val v = f.get(cur) ?: return@runCatching
+                        if (v is Aweme) return v
+                        if (v.javaClass.name.contains("ViewHolder", true)) {
+                            v.javaClass.declaredFields.forEach { f2 ->
+                                runCatching {
+                                    f2.isAccessible = true
+                                    val v2 = f2.get(v)
+                                    if (v2 is Aweme) return v2
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val p = cur!!.parent
+            cur = if (p is View) p else null
+            depth++
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
+
+        if (currentAweme == null) {
+            currentAweme = resolveAwemeFromView(view) ?: aweme
+        }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -274,13 +315,14 @@ class HLongPressLayout : BaseHook() {
                 DownloadLogic(
                     hook = this@HLongPressLayout,
                     context = view.context,
-                    aweme = aweme,
+                    aweme = currentAweme ?: aweme,
                 )
             }
 
             "视频信息" -> {
                 singleLaunchMain("$item") {
-                    val msg = "视频属地: ${aweme?.cityInfo()}\n发布时间: ${aweme?.createDate()}".trim()
+                    val a = currentAweme ?: aweme
+                    val msg = "视频属地: ${a?.cityInfo()}\n发布时间: ${a?.createDate()}".trim()
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -456,7 +498,10 @@ class HLongPressLayout : BaseHook() {
                 onAfter {
                     runCatching {
                         val a: Aweme? = thisObject?.findFieldGetValue { type(Aweme::class.java) }
-                        if (a != null) aweme = a
+                        if (a != null) {
+                            aweme = a
+                            currentAweme = a
+                        }
                     }
                 }
             }
