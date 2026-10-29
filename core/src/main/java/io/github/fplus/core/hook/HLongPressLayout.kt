@@ -444,7 +444,7 @@ class HLongPressLayout : BaseHook() {
             lparam.hookClass(presenter).methodAllByName("onBindSafe") {
                 onAfter {
                     runCatching {
-                        val a = thisObject?.findFieldGetValue { type(Aweme::class.java) }
+                        val a: Aweme? = thisObject?.findFieldGetValue { type(Aweme::class.java) }
                         if (a != null) aweme = a
                     }
                 }
