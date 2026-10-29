@@ -355,75 +355,82 @@ class HLongPressLayout : BaseHook() {
     }
 
     override fun onInit() {
+        // 长按拦截：OnLongPressInterceptListener 的实现类有多个（含匿名类），全部挂上
+        val longPressTargets =
+            (DexkitBuilder.longPressEventClazzList + listOfNotNull(DexkitBuilder.longPressEventClazz)).distinct()
 
-        // 长按菜单事件拦截
-        DexkitBuilder.longPressEventClazz?.also {
-            lparam.hookClass(it)
-                // 40.6.0 适配：原方法名 onLongPressAwemeSure 在 40.6.0 全库 0 命中，
-                // 且新实现的方法名是混淆的（X/0UWT 里为 LIZ）。故改为按参数类型绑定 ——
-                // (float, float) 是该长按回调接口方法（X/0w4F 的唯一方法 LIZ(FF)V）的签名。
-                .methodAllByParamTypes(
-                    Float::class.java,
-                    Float::class.java,
-                ) {
-                    onBefore {
-                        val x = args[0] as Float
-                        val y = args[1] as Float
+        longPressTargets.forEach { clz ->
+            runCatching {
+                lparam.hookClass(clz)
+                    .methodAllByParamTypes(
+                        Float::class.java,
+                        Float::class.java,
+                    ) {
+                        onBefore {
+                            val y = args[1] as Float
 
-                        // 长按上半部分唤起模块设置, 同时拦截抖音原生长按弹窗
-                        if (config.isLongPressSetting && y < screenSize.height / 2) {
-                            // 36.8.0：OnLongPressInterceptListener.onLongPressIntercept 返回 boolean，
-                            // 必须 setResult(true) 才算"拦截成功"，setResultVoid() 会当成未拦截。
+                            // 长按上半部分唤起模块设置，同时拦截抖音原生长按弹窗
+                            // 36.8.0：onLongPressIntercept 返回 boolean，必须 setResult(true)
+                            if (config.isLongPressSetting && y < screenSize.height / 2) {
+                                setResult(true)
+                                return@onBefore
+                            }
+
+                            if (!config.isNeatMode)
+                                return@onBefore
+
+                            aweme = thisObject?.findFieldGetValue { type(Aweme::class.java) }
+                                ?: HVideoViewHolder.aweme
+
+                            // 清爽模式开启时全屏拦截原生面板，避免"模块菜单 + 原生菜单"双弹
                             setResult(true)
-                            return@onBefore
                         }
-
-                        if (!config.isNeatMode)
-                            return@onBefore
-
-                        aweme = thisObject?.findFieldGetValue { type(Aweme::class.java) }
-                            ?: HVideoViewHolder.aweme
-
-                        // 与 onLongPress 的区域判定保持一致: 上半被模块设置占用时,
-                        // 清爽模式菜单的拦截区改为下半。
-                        // 36.x：只要清爽模式开启，全屏都拦截原生面板，避免"模块菜单 + 原生菜单"双弹。
-                        if (config.isNeatMode)
-                            setResult(true)
                     }
-                }
+            }.onFailure { XplerLog.e(it) }
         }
 
-        // 双击点赞事件拦截
-        DexkitBuilder.doubleClickEventClazz?.also {
-            lparam.hookClass(it)
-                .methodAllByParamTypes(
-                    View::class.java,
-                    MotionEvent::class.java,
-                    MotionEvent::class.java,
-                    MotionEvent::class.java,
-                ) {
-                    onBefore {
-                        if (!config.isDoubleClickType)
-                            return@onBefore
-
-                        if (config.doubleClickType == 1)
-                            setResultVoid()
-                    }
-                }
-        }
-
-        // 36.x 兜底：36.8.0 上没有四参方法，按方法名 handleDoubleClick 拦截
+        // 双击点赞拦截 ①：handleDoubleClick(MotionEvent)
         DexkitBuilder.doubleClickEventClazz?.also { clz ->
             runCatching {
                 lparam.hookClass(clz).methodAllByParamTypes(MotionEvent::class.java) {
                     onBefore {
-                        if (!config.isDoubleClickType)
-                            return@onBefore
-
-                        if (config.doubleClickType == 1)
-                            setResultVoid()
+                        if (!config.isDoubleClickType) return@onBefore
+                        if (config.doubleClickType == 1) setResultVoid()
                     }
                 }
+            }.onFailure { XplerLog.e(it) }
+        }
+
+        // 双击点赞拦截 ②：真正的点赞入口
+        //   BaseListFragmentPanel.handleBigDiggViewClick(MotionEvent, IFeedViewHolder, Aweme)
+        // 基类是 abstract，子类不重写此方法，挂基类即可覆盖所有子类实例。
+        runCatching {
+            val panel = lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel")
+            val vhClz = lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.adapter.IFeedViewHolder")
+            lparam.hookClass(panel)
+                .methodAllByParamTypes(MotionEvent::class.java, vhClz, Aweme::class.java) {
+                    onBefore {
+                        if (!config.isDoubleClickType) return@onBefore
+                        if (config.doubleClickType == 1) setResultVoid()
+                    }
+                }
+        }.onFailure { XplerLog.e(it) }
+
+        // 双击点赞拦截 ③：旧版四参方法（对其他版本有效）
+        DexkitBuilder.doubleClickEventClazz?.also { clz ->
+            runCatching {
+                lparam.hookClass(clz)
+                    .methodAllByParamTypes(
+                        View::class.java,
+                        MotionEvent::class.java,
+                        MotionEvent::class.java,
+                        MotionEvent::class.java,
+                    ) {
+                        onBefore {
+                            if (!config.isDoubleClickType) return@onBefore
+                            if (config.doubleClickType == 1) setResultVoid()
+                        }
+                    }
             }.onFailure { XplerLog.e(it) }
         }
     }

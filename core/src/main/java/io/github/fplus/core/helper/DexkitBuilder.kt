@@ -53,6 +53,8 @@ object DexkitBuilder {
     var chatListRecalledHintClazz: Class<*>? = null
     var restartUtilsClazz: Class<*>? = null
     var longPressEventClazz: Class<*>? = null
+    /** 36.8.0：OnLongPressInterceptListener 的所有实现类（匿名类不保证带 Context 字段） */
+    var longPressEventClazzList: List<Class<*>> = emptyList()
     var doubleClickEventClazz: Class<*>? = null
     var autoPlayControllerClazz: Class<*>? = null
 
@@ -529,6 +531,23 @@ object DexkitBuilder {
                 }
             }
             longPressEventClazz = longPressEvent.instance("longPressEvent")
+
+            // 36.8.0：OnLongPressInterceptListener 的实现有多个（FeedLongPressLayoutPresenter 的匿名类、
+            // 时刻长按 presenter 等），匿名类不一定带 Context 字段，结构 matcher 会全灭。
+            // 这里只按接口收敛，把所有实现类收集起来逐个 hook。
+            runCatching {
+                val impls = bridge.findClass {
+                    matcher {
+                        interfaces {
+                            add { className = "com.ss.android.ugc.aweme.feed.listener.OnLongPressInterceptListener" }
+                        }
+                    }
+                }
+                longPressEventClazzList = impls.mapNotNull { cd ->
+                    runCatching { cd.getInstance(lparam.classLoader) }.getOrNull()
+                }
+                KLogCat.tagI(TAG, "found-class[longPressList]: ${longPressEventClazzList.map { it.name }}")
+            }.onFailure { XplerLog.e(it) }
 
             // 36.x 兜底：上面依赖 40.6.0 的混淆接口名 X.0w4F，36.8.0 不存在。
             // 改用「Aweme 字段 + Context 字段 + (View, MotionEvent) 方法」结构化定位。
