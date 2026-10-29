@@ -320,7 +320,9 @@ public class SparkInit implements IXposedHookLoadPackage {
         Object builder = XposedHelpers.callMethod(beanSvc, M_NEWBLD);
         progress("step", "builder ok");
 
-        setConversation(client, center, builder, conversationId);
+        // 36.8.0：会话查询会死锁（getConversationListModel / getConversation 调用不返回），
+        // 改成直接用会话ID字符串设置 —— 30.9.0 时代就是这么发的（builder.LIZ(会话ID)）。
+        setConversationById(builder, conversationId);
         XposedHelpers.callMethod(builder, M_MSGTYPE, TYPE_TEXT);
         // 内容必须是 JSON（实测 status=2 成功；纯文字反而渲染不出来）
         String content = "{\"text\":" + jsonString(text) + ",\"type\":700}";
@@ -328,12 +330,7 @@ public class SparkInit implements IXposedHookLoadPackage {
         log("发送: type=" + TYPE_TEXT + "  content=" + content);
         Object msg = XposedHelpers.callMethod(builder, M_BUILD);
 
-        // SendMsgHandler 第一步就是按会话ID查本地会话模型，查不到必然失败
-        progress("step", "等会话出现");
-        if (!waitConversation(client, center, conversationId, 180)) {
-            throw new IllegalStateException("会话未出现在本地模型（列表还没加载完）: " + conversationId);
-        }
-        progress("step", "会话就绪，准备发送");
+        progress("step", "消息已构建，准备发送");
         sendMessage(client, center, msg);
         progress("step", "已提交 sendMessage");
 
@@ -385,6 +382,36 @@ public class SparkInit implements IXposedHookLoadPackage {
             try { m.setAccessible(true); return m.invoke(client); } catch (Throwable ignored) { }
         }
         return null;
+    }
+
+    /** 直接用会话ID字符串设置 builder（避开会死锁的会话模型查询） */
+    private void setConversationById(Object builder, String conversationId) {
+        for (java.lang.reflect.Method m : builder.getClass().getDeclaredMethods()) {
+            if (m.getParameterCount() != 1) continue;
+            if (m.getParameterTypes()[0] != String.class) continue;
+            String n = m.getName();
+            boolean looksRight = n.equals("conversation") || n.equals("conversationId")
+                    || n.equals("LIZ") || n.equals("setConversation") || n.equals("setConversationId");
+            if (!looksRight) continue;
+            try {
+                m.setAccessible(true);
+                m.invoke(builder, conversationId);
+                progress("step", "会话ID已设置: " + n);
+                return;
+            } catch (Throwable ignored) { }
+        }
+        // 兜底：任意一个 String 入参方法
+        for (java.lang.reflect.Method m : builder.getClass().getDeclaredMethods()) {
+            if (m.getParameterCount() != 1) continue;
+            if (m.getParameterTypes()[0] != String.class) continue;
+            try {
+                m.setAccessible(true);
+                m.invoke(builder, conversationId);
+                progress("step", "会话ID已设置(兜底): " + m.getName());
+                return;
+            } catch (Throwable ignored) { }
+        }
+        progress("step", "会话ID设置失败：builder 没有 String 入参方法");
     }
 
     /** 等会话出现在本地会话模型里（App 刚启动时列表可能还没加载完） */
