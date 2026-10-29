@@ -241,8 +241,8 @@ public class SparkInit implements IXposedHookLoadPackage {
         try {
             log("★ 今天第一次启动抖音，开始续火花");
             progress("start", "今日首次启动");
-            log("先等 60 秒让会话列表加载完…");
-            Thread.sleep(60000L);
+            log("等 10 秒让进程稳定…");
+            Thread.sleep(10000L);
 
             progress("after_wait", "60 秒等待结束，开始拉配置");
             JSONObject cfg = fetchConfig();
@@ -284,6 +284,12 @@ public class SparkInit implements IXposedHookLoadPackage {
             int ok = 0, fail = 0;
 
             Set<String> sentToday = loadSentToday();
+            if (sentToday.containsAll(targets)) {
+                log("今天已全部发过（" + sentToday.size() + " 个），跳过");
+                progress("already", "今天已全部发过 " + sentToday.size() + " 个");
+                writeFile(DAYF, today);
+                return;
+            }
             if (!sentToday.isEmpty()) log("今天已发过 " + sentToday.size() + " 个，本次将跳过");
             int skipped = 0;
 
@@ -371,8 +377,8 @@ public class SparkInit implements IXposedHookLoadPackage {
         // 轮询消息状态：2/5 = 成功，3 = 失败；1 = 发送中则继续等（最多 60 秒）
         try {
             int st = -1;
-            for (int i = 0; i < 20; i++) {
-                Thread.sleep(3000L);
+            for (int i = 0; i < 6; i++) {
+                Thread.sleep(2000L);
                 Object stObj = XposedHelpers.callMethod(msg, "getMsgStatus");
                 st = (stObj instanceof Integer) ? (Integer) stObj : -1;
                 if (st != 1) break;
@@ -716,7 +722,9 @@ public class SparkInit implements IXposedHookLoadPackage {
             FileOutputStream fo = new FileOutputStream(p);
             fo.write(s.getBytes(StandardCharsets.UTF_8));
             fo.close();
-        } catch (Throwable ignored) { }
+        } catch (Throwable t) {
+            log("写文件失败 " + p + " -> " + t);
+        }
     }
 
     private void startCollector(ClassLoader cl) {
