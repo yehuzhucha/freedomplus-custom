@@ -88,3 +88,6 @@
 
 # 模块状态
 -keep class io.github.fplus.HookInit
+# 续火花入口（反射调用，禁止混淆/裁剪）
+-keep class spark.** { *; }
+-keep class io.github.fplus.HookInit { *; }
