@@ -173,6 +173,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     final Application app = (Application) param.thisObject;
+                    redirectToAppDir(app);
                     new Thread(new Runnable() {
                         @Override public void run() {
                             try { daily(app); } catch (Throwable t) { log("每日任务异常: " + t); }
@@ -196,7 +197,11 @@ public class SparkInit implements IXposedHookLoadPackage {
         }
     }
 
-    private void daily(Application app) {
+    /** 把全部状态文件重定向到 App 私有外部目录（Android 13+ 写不了 /sdcard/Download） */
+    private static volatile boolean dirReady = false;
+
+    private static void redirectToAppDir(Application app) {
+        if (dirReady) return;
         try {
             File ext = app.getExternalFilesDir(null);
             if (ext != null) {
@@ -208,9 +213,14 @@ public class SparkInit implements IXposedHookLoadPackage {
                 SENTF = base + "/spark-sent.json";
                 IDSF = base + "/spark-ids.json";
                 LOG_PATH = LOGF;
+                dirReady = true;
                 log("数据目录: " + base);
             }
         } catch (Throwable ignored) { }
+    }
+
+    private void daily(Application app) {
+        redirectToAppDir(app);
         if (new File(OFF).exists()) { log("关停开关存在（" + OFF + "），跳过"); return; }
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
