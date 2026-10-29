@@ -98,11 +98,14 @@ public class SparkInit implements IXposedHookLoadPackage {
     private static volatile boolean PENDING = false;
     private static volatile boolean COLLECTOR_STARTED = false;
 
+    /** Android 13+ 写不了 /sdcard/Download，回退到 App 私有外部目录（文件管理器可见） */
+    private static volatile String LOG_PATH = LOGF;
+
     private static void log(String s) {
         String line = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(new Date()) + "  " + s;
         XposedBridge.log("Spark: " + s);
         try {
-            FileOutputStream fo = new FileOutputStream(LOGF, true);
+            FileOutputStream fo = new FileOutputStream(LOG_PATH, true);
             fo.write((line + "\n").getBytes(StandardCharsets.UTF_8));
             fo.close();
         } catch (Throwable ignored) { }
@@ -190,6 +193,13 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     private void daily(Application app) {
+        try {
+            File ext = app.getExternalFilesDir(null);
+            if (ext != null) {
+                File f = new File(ext, "spark.log");
+                LOG_PATH = f.getAbsolutePath();
+            }
+        } catch (Throwable ignored) { }
         if (new File(OFF).exists()) { log("关停开关存在（" + OFF + "），跳过"); return; }
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
@@ -299,12 +309,16 @@ public class SparkInit implements IXposedHookLoadPackage {
 
     /** 核心：调用抖音官方 IM 发送通道 */
     private void sendText(ClassLoader cl, String conversationId, String text) {
+        progress("step", "开始取 IM client");
         Object client = getClient(cl);
         if (client == null) throw new IllegalStateException("IM SDK 未就绪（取 IM client 失败）");
+        progress("step", "client ok: " + client.getClass().getName());
 
         Object center = XposedHelpers.callMethod(client, M_CENTER);
+        progress("step", "center ok");
         Object beanSvc = XposedHelpers.callMethod(client, M_BEANSVC);
         Object builder = XposedHelpers.callMethod(beanSvc, M_NEWBLD);
+        progress("step", "builder ok");
 
         setConversation(client, center, builder, conversationId);
         XposedHelpers.callMethod(builder, M_MSGTYPE, TYPE_TEXT);
@@ -315,10 +329,13 @@ public class SparkInit implements IXposedHookLoadPackage {
         Object msg = XposedHelpers.callMethod(builder, M_BUILD);
 
         // SendMsgHandler 第一步就是按会话ID查本地会话模型，查不到必然失败
+        progress("step", "等会话出现");
         if (!waitConversation(client, center, conversationId, 180)) {
             throw new IllegalStateException("会话未出现在本地模型（列表还没加载完）: " + conversationId);
         }
+        progress("step", "会话就绪，准备发送");
         sendMessage(client, center, msg);
+        progress("step", "已提交 sendMessage");
 
         // 轮询消息状态：2/5 = 成功，3 = 失败；1 = 发送中则继续等（最多 60 秒）
         try {
