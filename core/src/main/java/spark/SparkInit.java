@@ -241,10 +241,10 @@ public class SparkInit implements IXposedHookLoadPackage {
         try {
             log("★ 今天第一次启动抖音，开始续火花");
             progress("start", "今日首次启动");
-            log("等 10 秒让进程稳定…");
-            Thread.sleep(10000L);
+            log("等 15 秒让进程稳定…");
+            Thread.sleep(15000L);
 
-            progress("after_wait", "60 秒等待结束，开始拉配置");
+            progress("after_wait", "15 秒等待结束，开始拉配置");
             JSONObject cfg = fetchConfig();
             if (cfg == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
             CFG = cfg;
@@ -284,6 +284,11 @@ public class SparkInit implements IXposedHookLoadPackage {
             int ok = 0, fail = 0;
 
             Set<String> sentToday = loadSentToday();
+            if (CFG != null && CFG.optBoolean("force", false)) {
+                sentToday.clear();
+                log("force=true，忽略今日已发记录，全部重发");
+                progress("step", "force=true 全部重发");
+            }
             if (sentToday.containsAll(targets)) {
                 log("今天已全部发过（" + sentToday.size() + " 个），跳过");
                 progress("already", "今天已全部发过 " + sentToday.size() + " 个");
@@ -301,14 +306,25 @@ public class SparkInit implements IXposedHookLoadPackage {
                     continue;
                 }
                 try {
-                    sendText(cl, cid, text);
-                    markSent(cid);
-                    ok++;
-                    log("(" + (i + 1) + "/" + targets.size() + ") 已提交: " + cid);
-                    progress("send_ok", (i + 1) + "/" + targets.size() + " " + cid);
+                    int st = sendText(cl, cid, text);
+                    if (st != 2 && st != 5) {
+                        log("状态 " + st + "，8 秒后重试一次: " + cid);
+                        Thread.sleep(8000L);
+                        st = sendText(cl, cid, text);
+                    }
+                    if (st == 2 || st == 5) {
+                        markSent(cid);
+                        ok++;
+                        log("(" + (i + 1) + "/" + targets.size() + ") 成功: " + cid);
+                        progress("send_ok", (i + 1) + "/" + targets.size() + " " + cid);
+                    } else {
+                        fail++;
+                        log("(" + (i + 1) + "/" + targets.size() + ") 失败 status=" + st + ": " + cid);
+                        progress("send_fail", (i + 1) + "/" + targets.size() + " status=" + st + " " + cid);
+                    }
                 } catch (Throwable t) {
                     fail++;
-                    log("(" + (i + 1) + "/" + targets.size() + ") 失败: " + cid + " -> " + t);
+                    log("(" + (i + 1) + "/" + targets.size() + ") 异常: " + cid + " -> " + t);
                     progress("send_fail", cid + " -> " + t);
                 }
                 if (i < targets.size() - 1) {
@@ -336,7 +352,7 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     /** 核心：调用抖音官方 IM 发送通道 */
-    private void sendText(ClassLoader cl, String conversationId, String text) {
+    private int sendText(ClassLoader cl, String conversationId, String text) {
         progress("step", "开始取 IM client");
         Object client = getClient(cl);
         if (client == null) throw new IllegalStateException("IM SDK 未就绪（取 IM client 失败）");
@@ -374,20 +390,21 @@ public class SparkInit implements IXposedHookLoadPackage {
         sendMessage(client, center, msg);
         progress("step", "已提交 sendMessage");
 
-        // 轮询消息状态：2/5 = 成功，3 = 失败；1 = 发送中则继续等（最多 60 秒）
+        // 轮询消息状态：2/5 = 成功，3 = 失败；1 = 发送中则继续等（最多 36 秒）
+        int st = -1;
         try {
-            int st = -1;
-            for (int i = 0; i < 6; i++) {
-                Thread.sleep(2000L);
+            for (int i = 0; i < 12; i++) {
+                Thread.sleep(3000L);
                 Object stObj = XposedHelpers.callMethod(msg, "getMsgStatus");
                 st = (stObj instanceof Integer) ? (Integer) stObj : -1;
                 if (st != 1) break;
             }
-            String desc = (st == 2 || st == 5) ? "成功" : (st == 3 ? "失败" : (st == 1 ? "发送中超时(60秒)" : "未知"));
+            String desc = (st == 2 || st == 5) ? "成功" : (st == 3 ? "失败" : (st == 1 ? "发送中超时" : "未知"));
             log("★ 发送结果: status=" + st + " (" + desc + ")");
         } catch (Throwable t) {
             log("读消息状态失败: " + t);
         }
+        return st;
     }
 
     /** 发送消息：30.9~35.9 走 IMHandlerCenter.sendMessage；40.x 走 SendMsgHandler(IMSdkContext).send */
