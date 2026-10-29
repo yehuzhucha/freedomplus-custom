@@ -413,7 +413,7 @@ class HLongPressLayout : BaseHook() {
         // 36.x 兜底：36.8.0 上没有四参方法，按方法名 handleDoubleClick 拦截
         DexkitBuilder.doubleClickEventClazz?.also { clz ->
             runCatching {
-                lparam.hookClass(clz).methodAllByName("handleDoubleClick") {
+                lparam.hookClass(clz).methodAllByParamTypes(MotionEvent::class.java) {
                     onBefore {
                         if (!config.isDoubleClickType)
                             return@onBefore

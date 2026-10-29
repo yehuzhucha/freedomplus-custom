@@ -583,10 +583,16 @@ object DexkitBuilder {
             // 36.x 兜底：36.8.0 全库不存在 (View, MotionEvent×3) 的四参方法，
             // 但 handleDoubleClick 这个方法名未混淆，按名字定位即可。
             if (doubleClickEventClazz == null) {
+                // 36.8.0 实测：com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel
+                //   .handleDoubleClick(Landroid/view/MotionEvent;)V
+                // 注意同名的还有 IM 的 LikePanelCellLogic.handleDoubleClick(Float, Float)，必须带参数类型区分。
                 val byName = bridge.findClass {
                     matcher {
                         methods {
-                            add { name = "handleDoubleClick" }
+                            add {
+                                name = "handleDoubleClick"
+                                paramTypes = listOf("android.view.MotionEvent")
+                            }
                         }
                     }
                 }
