@@ -142,13 +142,21 @@ class HLongPressLayout : BaseHook() {
                         .methodAllByParamTypes(Float::class.java, Float::class.java) {
                             onBefore {
                                 val y = args[1] as Float
-                                // 长按上半屏：模块设置接管，吃掉原生面板
-                                if (config.isLongPressSetting && y < screenSize.height / 2) {
+                                val half = screenSize.height / 2
+
+                                // 上半屏：长按设置接管
+                                if (config.isLongPressSetting && y < half) {
                                     setResultVoid()
                                     return@onBefore
                                 }
-                                // 清爽模式：全屏吃掉原生面板，只留模块菜单
-                                if (config.isNeatMode) setResultVoid()
+
+                                // 清爽模式：只在模块菜单真正会弹出的那一半吃掉原生面板，
+                                // 另一半放行给抖音原生菜单（与 onLongPress 的区域判定保持一致）
+                                if (config.isNeatMode) {
+                                    val menuOnTop = config.longPressMode && !config.isLongPressSetting
+                                    val inModuleArea = if (menuOnTop) y < half else y >= half
+                                    if (inModuleArea) setResultVoid()
+                                }
                             }
                         }
                     XplerLog.i("FPlus", "panelHook installed: ${clz.name}")
@@ -414,10 +422,11 @@ class HLongPressLayout : BaseHook() {
                     ) {
                         onBefore {
                             val y = args[1] as Float
+                            val half = screenSize.height / 2
 
                             // 长按上半部分唤起模块设置，同时拦截抖音原生长按弹窗
                             // 36.8.0：onLongPressIntercept 返回 boolean，必须 setResult(true)
-                            if (config.isLongPressSetting && y < screenSize.height / 2) {
+                            if (config.isLongPressSetting && y < half) {
                                 setResult(true)
                                 return@onBefore
                             }
@@ -428,8 +437,10 @@ class HLongPressLayout : BaseHook() {
                             aweme = thisObject?.findFieldGetValue { type(Aweme::class.java) }
                                 ?: HVideoViewHolder.aweme
 
-                            // 清爽模式开启时全屏拦截原生面板，避免"模块菜单 + 原生菜单"双弹
-                            setResult(true)
+                            // 只在模块菜单弹出的那一半拦截，另一半放行原生菜单
+                            val menuOnTop = config.longPressMode && !config.isLongPressSetting
+                            val inModuleArea = if (menuOnTop) y < half else y >= half
+                            if (inModuleArea) setResult(true)
                         }
                     }
             }.onFailure { XplerLog.e(it) }
