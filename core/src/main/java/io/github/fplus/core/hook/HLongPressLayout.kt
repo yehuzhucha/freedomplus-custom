@@ -70,6 +70,7 @@ class HLongPressLayout : BaseHook() {
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    installPanelHooks(thisView)
                     longPressRunnable?.let { handler.postDelayed(it, LONG_PRESS_TIME.toLong()) }
                     touchDownX = event.x
                     touchDownY = event.y
@@ -109,6 +110,51 @@ class HLongPressLayout : BaseHook() {
         }.onFailure {
             XplerLog.e(it)
         }
+    }
+
+    /**
+     * 36.8.0：长按面板不是由 OnLongPressInterceptListener 弹出的，而是由
+     * FeedLongPressLayoutPresenter 里另一个 (float,float)->void 回调（X.0Vjd 实现类，
+     * 内部 new X.13vb(...) 后调 X.13va.LIZ() 显示）触发的。
+     * 该回调是 LongPressLayout 的字段，运行时直接扫字段拿到实例、挂它的方法，
+     * 不依赖混淆类名。
+     */
+    private var panelHookInstalled = false
+
+    private fun installPanelHooks(view: View) {
+        if (panelHookInstalled) return
+        panelHookInstalled = true
+        runCatching {
+            view.javaClass.declaredFields.forEach { f ->
+                runCatching {
+                    f.isAccessible = true
+                    val value = f.get(view) ?: return@runCatching
+                    val clz = value.javaClass
+                    if (clz.isInterface) return@runCatching
+                    val hit = clz.declaredMethods.any {
+                        it.parameterTypes.size == 2 &&
+                            it.parameterTypes[0] == java.lang.Float.TYPE &&
+                            it.parameterTypes[1] == java.lang.Float.TYPE &&
+                            it.returnType == java.lang.Void.TYPE
+                    }
+                    if (!hit) return@runCatching
+                    lparam.hookClass(clz)
+                        .methodAllByParamTypes(Float::class.java, Float::class.java) {
+                            onBefore {
+                                val y = args[1] as Float
+                                // 长按上半屏：模块设置接管，吃掉原生面板
+                                if (config.isLongPressSetting && y < screenSize.height / 2) {
+                                    setResultVoid()
+                                    return@onBefore
+                                }
+                                // 清爽模式：全屏吃掉原生面板，只留模块菜单
+                                if (config.isNeatMode) setResultVoid()
+                            }
+                        }
+                    XplerLog.i("FPlus", "panelHook installed: ${clz.name}")
+                }.onFailure { XplerLog.e(it) }
+            }
+        }.onFailure { XplerLog.e(it) }
     }
 
     private fun isMoved(event: MotionEvent): Boolean {
@@ -388,6 +434,22 @@ class HLongPressLayout : BaseHook() {
                     }
             }.onFailure { XplerLog.e(it) }
         }
+
+        // 36.8.0：视频信息/下载都依赖 aweme，而它挂在 FeedLongPressLayoutPresenter 的字段上。
+        // 该类名未混淆，直接 hook onBindSafe 抓当前 aweme（每次绑定新视频都会刷新）。
+        runCatching {
+            val presenter = lparam.classLoader.loadClass(
+                "com.ss.android.ugc.aweme.feed.long_press.presenter.FeedLongPressLayoutPresenter"
+            )
+            lparam.hookClass(presenter).methodAllByName("onBindSafe") {
+                onAfter {
+                    runCatching {
+                        val a = thisObject?.findFieldGetValue { type(Aweme::class.java) }
+                        if (a != null) aweme = a
+                    }
+                }
+            }
+        }.onFailure { XplerLog.e(it) }
 
         // 双击点赞拦截 ①：handleDoubleClick(MotionEvent)
         DexkitBuilder.doubleClickEventClazz?.also { clz ->
