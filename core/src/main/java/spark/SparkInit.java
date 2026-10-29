@@ -193,7 +193,7 @@ public class SparkInit implements IXposedHookLoadPackage {
         if (new File(OFF).exists()) { log("关停开关存在（" + OFF + "），跳过"); return; }
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
-        if (today.equals(readFile(DAYF).trim())) { log("今天已跑过，跳过"); return; }
+        if (today.equals(readFile(DAYF).trim())) { log("今天已跑过，跳过"); progress("already", today + " 已跑过"); return; }
 
         try {
             File lf = new File(LOCK);
@@ -209,12 +209,14 @@ public class SparkInit implements IXposedHookLoadPackage {
 
         try {
             log("★ 今天第一次启动抖音，开始续火花");
+            progress("start", "今日首次启动");
             log("先等 60 秒让会话列表加载完…");
             Thread.sleep(60000L);
 
+            progress("after_wait", "60 秒等待结束，开始拉配置");
             JSONObject cfg = fetchConfig();
-            if (cfg == null) { log("拿不到云端配置，放弃"); return; }
-            if (!cfg.optBoolean("enabled", true)) { log("云端开关是关的，跳过"); return; }
+            if (cfg == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
+            if (!cfg.optBoolean("enabled", true)) { log("云端开关是关的，跳过"); progress("skip", "云端开关关闭"); return; }
 
             String text = "[续火花吧]";
             JSONArray msgs = cfg.optJSONArray("messages");
@@ -226,6 +228,7 @@ public class SparkInit implements IXposedHookLoadPackage {
             JSONArray ids = cfg.optJSONArray("targetIds");
             if (ids == null || ids.length() == 0) {
                 log("云端还没勾选好友（targetIds 为空），放弃");
+                progress("skip", "targetIds 为空");
                 return;
             }
 
@@ -242,6 +245,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                 if (s.length() > 0) targets.add(s);
             }
             log("共 " + targets.size() + " 个好友，文案: " + text);
+            progress("targets", "共 " + targets.size() + " 个好友，文案: " + text);
 
             ClassLoader cl = app.getClassLoader();
             Random rnd = new Random();
@@ -266,6 +270,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                 } catch (Throwable t) {
                     fail++;
                     log("(" + (i + 1) + "/" + targets.size() + ") 失败: " + cid + " -> " + t);
+                    progress("send_fail", cid + " -> " + t);
                 }
                 if (i < targets.size() - 1) {
                     int wait = gapMin + rnd.nextInt(Math.max(1, gapMax - gapMin + 1));
@@ -284,6 +289,7 @@ public class SparkInit implements IXposedHookLoadPackage {
 
         } catch (Throwable t) {
             log("每日任务出错: " + t);
+            progress("error", String.valueOf(t));
         } finally {
             running = false;
             try { new File(LOCK).delete(); } catch (Throwable ignored) { }
@@ -494,6 +500,17 @@ public class SparkInit implements IXposedHookLoadPackage {
         String body = httpGet(HOST + "/spark/config?token=" + TOKEN);
         if (body == null) return null;
         try { return new JSONObject(body); } catch (Throwable t) { log("配置解析失败: " + t); return null; }
+    }
+
+    /** 进度上报：每个阶段都打到服务端，出问题能看出卡在哪一步 */
+    private void progress(String stage, String detail) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("stage", stage);
+            o.put("detail", detail);
+            o.put("ts", System.currentTimeMillis());
+            httpPost(HOST + "/spark/log?token=" + TOKEN, o.toString());
+        } catch (Throwable ignored) { }
     }
 
     private void report(int ok, int fail, int total, String text) {

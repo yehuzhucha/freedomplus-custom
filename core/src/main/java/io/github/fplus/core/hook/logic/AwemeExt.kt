@@ -19,9 +19,13 @@ fun Aweme.createDate(): String {
 }
 
 suspend fun Aweme.cityInfo(): String {
+    // 36.8.0：city 字段存在但很多视频为空，先判空再请求，避免 code=null 查出空串
+    val code = this.city?.trim().orEmpty()
+    if (code.isEmpty()) return "未提供（该视频无城市信息）"
+
     return withContext(Dispatchers.IO) {
         runCatching {
-            val result = KHttpUtils.get("http://api.ip33.com/Area_Code/GetArea/?code=$city")
+            val result = KHttpUtils.get("http://api.ip33.com/Area_Code/GetArea/?code=$code")
             val areaJson = result.parseJSON()
             val province = areaJson.getStringOrDefault("province")
             val city = areaJson.getStringOrDefault("city")
