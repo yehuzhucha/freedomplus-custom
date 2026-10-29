@@ -551,7 +551,7 @@ object DexkitBuilder {
                         }
                     }
                 }
-                longPressEventClazz = fallback.instance("longPressFallback")
+                longPressEventClazz = fallback.instanceFirst("longPressFallback")
             }
 
             // 40.6.0 无法恢复：已穷举证明全库不存在 (View, MotionEvent, MotionEvent, MotionEvent)，
@@ -590,7 +590,7 @@ object DexkitBuilder {
                         }
                     }
                 }
-                doubleClickEventClazz = byName.instance("doubleClickByName")
+                doubleClickEventClazz = byName.instanceFirst("doubleClickByName")
             }
 
             // 40.6.0 适配：字符串 "normal" 在目标类的字符串表中已消失（旧版有），
@@ -803,6 +803,15 @@ object DexkitBuilder {
     // 拓展方法
     private fun ClassDataList?.instance(label: String): Class<*>? {
         return this?.singleOrNull().instance(label)
+    }
+
+    /**
+     * 兜底用：候选不唯一时取第一个，而不是直接放弃。
+     * 36.x 上结构化 matcher 常命中多个类，singleOrNull() 会返回 null。
+     */
+    private fun ClassDataList?.instanceFirst(label: String): Class<*>? {
+        KLogCat.tagI(TAG, "found-class[$label]: candidates=${this?.size}")
+        return this?.firstOrNull().instance(label)
     }
 
     private fun ClassData?.instance(label: String): Class<*>? {

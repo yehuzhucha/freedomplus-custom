@@ -384,14 +384,9 @@ class HLongPressLayout : BaseHook() {
 
                         // 与 onLongPress 的区域判定保持一致: 上半被模块设置占用时,
                         // 清爽模式菜单的拦截区改为下半。
-                        val menuOnTop = config.longPressMode && !config.isLongPressSetting
-                        if (menuOnTop) {
-                            if (y < screenSize.height / 2)
-                                setResultVoid()
-                        } else {
-                            if (y > screenSize.height / 2)
-                                setResultVoid()
-                        }
+                        // 36.x：只要清爽模式开启，全屏都拦截原生面板，避免"模块菜单 + 原生菜单"双弹。
+                        if (config.isNeatMode)
+                            setResultVoid()
                     }
                 }
         }
