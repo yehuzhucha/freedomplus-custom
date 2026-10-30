@@ -448,7 +448,11 @@ public class SparkInit implements IXposedHookLoadPackage {
         try {
             Class<?> api = XposedHelpers.findClass("com.bytedance.ies.im.core.api.client.ConversationListModel", cl);
             Object companion = XposedHelpers.getStaticObjectField(api, "Companion");
-            Object inst = XposedHelpers.callMethod(companion, "getInst");
+            Object inst = null;
+            try { inst = XposedHelpers.callMethod(companion, "getInst"); } catch (Throwable ignored) { }
+            if (inst == null) {
+                try { inst = XposedHelpers.getObjectField(companion, "inst"); } catch (Throwable ignored) { }
+            }
             if (inst != null) {
                 Object conv = XposedHelpers.callMethod(inst, "getConversation", cid);
                 if (conv != null) { log("会话对象: 路径1 命中"); return conv; }
@@ -467,6 +471,19 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     private Object resolveMessageUtils(ClassLoader cl) {
+        // 正确入口：MultiInstanceHelperKt 上静态无参、返回 IMessageUtils 的方法
+        try {
+            Class<?> helper = XposedHelpers.findClass("com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt", cl);
+            for (java.lang.reflect.Method m : helper.getMethods()) {
+                if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        && m.getParameterCount() == 0
+                        && "com.bytedance.im.core.internal.utils.IMessageUtils".equals(m.getReturnType().getName())) {
+                    Object o = m.invoke(null);
+                    if (o != null) { log("IMessageUtils: 从 MultiInstanceHelperKt." + m.getName()); return o; }
+                }
+            }
+        } catch (Throwable t) { log("MultiInstanceHelperKt 取 utils 失败: " + t); }
+        // 兜底：IMessageUtils 自身的静态无参工厂
         try {
             Class<?> u = XposedHelpers.findClass("com.bytedance.im.core.internal.utils.IMessageUtils", cl);
             for (java.lang.reflect.Method m : u.getDeclaredMethods()) {
@@ -474,7 +491,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                         && m.getParameterCount() == 0
                         && m.getReturnType() == u) {
                     Object o = m.invoke(null);
-                    if (o != null) return o;
+                    if (o != null) { log("IMessageUtils: 从自身静态方法 " + m.getName()); return o; }
                 }
             }
         } catch (Throwable t) { log("取 IMessageUtils 失败: " + t); }
@@ -529,7 +546,7 @@ public class SparkInit implements IXposedHookLoadPackage {
             } catch (Throwable ignored) { }
 
             Object utils = resolveMessageUtils(cl);
-            if (utils == null) { log("取不到 IMessageUtils"); return -1; }
+            if (utils == null) { log("取不到 IMessageUtils"); progress("step", "V2: 取不到 IMessageUtils"); return -1; }
 
             Class<?> listenerCls = XposedHelpers.findClass("com.bytedance.im.core.client.callback.IRequestListener", cl);
             final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
@@ -557,9 +574,10 @@ public class SparkInit implements IXposedHookLoadPackage {
             send.invoke(utils, msg, new HashMap<String, String>(), proxy);
 
             boolean done = latch.await(15, java.util.concurrent.TimeUnit.SECONDS);
-            if (!done) { log("发送回调超时 15 秒"); return 1; }
-            if (okFlag[0]) return 2;
+            if (!done) { log("发送回调超时 15 秒"); progress("step", "V2: 回调超时 15 秒"); return 1; }
+            if (okFlag[0]) { progress("step", "V2: 回调成功"); return 2; }
             log("发送失败回调: " + errMsg[0]);
+            progress("step", "V2: 失败回调 " + errMsg[0]);
             return 3;
         } catch (Throwable t) {
             log("sendTextV2 异常: " + t);
