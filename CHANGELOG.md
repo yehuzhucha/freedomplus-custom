@@ -408,3 +408,11 @@
 3. 它用 `IMessageUtils.sendMessage(msg, map, IRequestListener)` 等回调（15s），我们轮询 `getMsgStatus()`（这个调用本身会卡死）
 
 改动：新增 `sendTextV2()`（三段链路），失败返回 -1 时回退老的 `sendText()`；会话对象取不到直接报失败，不硬发。
+
+## v19 — IMessageUtils 的真实入口是 X.12pl.LIZ()（2026-10-30）
+
+v18 仍然报「V2: 取不到 IMessageUtils」。反查 36.8.0 的 dex：
+`dexdump -d` 里所有取 IMessageUtils 的调用点都是 `invoke-static {}, LX/12pl;.LIZ:()Lcom/bytedance/im/core/internal/utils/IMessageUtils;`
+——36.8.0 把工厂挪到了混淆类 `X.12pl`，`MultiInstanceHelperKt` 里只剩 `LIZ()`→IConversationListModel、`LIZIZ()`→IConversationModelMultiInstanceExt。
+
+改动：utils 入口按候选列表试 `X.12pl` → `MultiInstanceHelperKt`，命中哪个上报哪个。

@@ -471,30 +471,31 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     private Object resolveMessageUtils(ClassLoader cl) {
-        // 正确入口：MultiInstanceHelperKt 上静态无参、返回 IMessageUtils 的方法
-        try {
-            Class<?> helper = XposedHelpers.findClass("com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt", cl);
-            for (java.lang.reflect.Method m : helper.getMethods()) {
-                if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
-                        && m.getParameterCount() == 0
-                        && "com.bytedance.im.core.internal.utils.IMessageUtils".equals(m.getReturnType().getName())) {
+        // 36.8.0 实测：IMessageUtils 的工厂在 X.12pl.LIZ()（反编译 dex 里 invoke-static 查到的）
+        // 其它版本在 com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt，两个都试
+        String[] candidates = new String[]{
+                "X.12pl",
+                "com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt"
+        };
+        for (String cn : candidates) {
+            try {
+                Class<?> helper = XposedHelpers.findClass(cn, cl);
+                for (java.lang.reflect.Method m : helper.getMethods()) {
+                    if (!java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+                    if (m.getParameterCount() != 0) continue;
+                    if (!"com.bytedance.im.core.internal.utils.IMessageUtils".equals(m.getReturnType().getName())) continue;
                     Object o = m.invoke(null);
-                    if (o != null) { log("IMessageUtils: 从 MultiInstanceHelperKt." + m.getName()); return o; }
+                    if (o != null) {
+                        log("IMessageUtils: " + cn + "." + m.getName());
+                        progress("step", "V2: utils 来自 " + cn + "." + m.getName());
+                        return o;
+                    }
                 }
+            } catch (Throwable t) {
+                log("取 utils 失败 " + cn + ": " + t);
             }
-        } catch (Throwable t) { log("MultiInstanceHelperKt 取 utils 失败: " + t); }
-        // 兜底：IMessageUtils 自身的静态无参工厂
-        try {
-            Class<?> u = XposedHelpers.findClass("com.bytedance.im.core.internal.utils.IMessageUtils", cl);
-            for (java.lang.reflect.Method m : u.getDeclaredMethods()) {
-                if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
-                        && m.getParameterCount() == 0
-                        && m.getReturnType() == u) {
-                    Object o = m.invoke(null);
-                    if (o != null) { log("IMessageUtils: 从自身静态方法 " + m.getName()); return o; }
-                }
-            }
-        } catch (Throwable t) { log("取 IMessageUtils 失败: " + t); }
+        }
+        progress("step", "V2: utils 入口全失败（X.12pl / MultiInstanceHelperKt）");
         return null;
     }
 
