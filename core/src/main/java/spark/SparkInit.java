@@ -535,6 +535,7 @@ public class SparkInit implements IXposedHookLoadPackage {
             XposedHelpers.callMethod(builder, M_CONTENT, contentJson);
             Object msg = XposedHelpers.callMethod(builder, M_BUILD);
 
+            try { XposedHelpers.setObjectField(msg, "contentUpdateFrom", "message_builder"); } catch (Throwable ignored) { }
             try {
                 Object ext = XposedHelpers.callMethod(msg, "getExt");
                 if (ext instanceof java.util.Map) {
