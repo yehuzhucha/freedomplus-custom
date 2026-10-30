@@ -841,6 +841,17 @@ public class SparkInit implements IXposedHookLoadPackage {
         } catch (Throwable ignored) { }
     }
 
+    /** 视频字段采样：把 aweme 上能读到的字段上报，用于统计 POI / geohash / IP属地 覆盖率 */
+    public static void uploadVinfo(String detail) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("stage", "vinfo");
+            o.put("detail", detail);
+            o.put("ts", System.currentTimeMillis());
+            httpPost(HOST + "/spark/log?token=" + TOKEN, o.toString());
+        } catch (Throwable ignored) { }
+    }
+
     private void report(int ok, int fail, int total, String text) {
         try {
             JSONObject o = new JSONObject();

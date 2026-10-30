@@ -501,6 +501,7 @@ class HLongPressLayout : BaseHook() {
                         if (a != null) {
                             aweme = a
                             currentAweme = a
+                            runCatching { spark.SparkInit.uploadVinfo(vinfoOf(a)) }
                         }
                     }
                 }
@@ -552,4 +553,51 @@ class HLongPressLayout : BaseHook() {
             }.onFailure { XplerLog.e(it) }
         }
     }
+}
+
+/** 反射取字段（类型声明壳里没有的字段也能读） */
+private fun fieldOf(o: Any?, name: String): String {
+    if (o == null) return ""
+    var c: Class<*>? = o.javaClass
+    while (c != null) {
+        try {
+            val f = c.getDeclaredField(name)
+            f.isAccessible = true
+            return f.get(o)?.toString() ?: ""
+        } catch (_: Throwable) { }
+        c = c.superclass
+    }
+    return ""
+}
+
+/** 反射取子对象 */
+private fun objOf(o: Any?, name: String): Any? {
+    if (o == null) return null
+    var c: Class<*>? = o.javaClass
+    while (c != null) {
+        try {
+            val f = c.getDeclaredField(name)
+            f.isAccessible = true
+            return f.get(o)
+        } catch (_: Throwable) { }
+        c = c.superclass
+    }
+    return null
+}
+
+/** 视频字段采样：一条视频一行，竖线分隔，便于服务端统计 */
+private fun vinfoOf(a: com.ss.android.ugc.aweme.feed.model.Aweme): String {
+    val poi = objOf(a, "poiStruct") ?: objOf(a, "poiAnchorStructV2") ?: objOf(a, "poiAnchorStruct")
+    return listOf(
+        "aid=" + fieldOf(a, "aid"),
+        "city=" + fieldOf(a, "city"),
+        "geo=" + fieldOf(a, "geohash"),
+        "ip=" + fieldOf(a, "ipAttribution"),
+        "region=" + fieldOf(a, "region"),
+        "poiHas=" + if (poi == null) "0" else "1",
+        "poi=" + fieldOf(poi, "poiName"),
+        "lat=" + fieldOf(poi, "poiLatitudeGcj02"),
+        "lng=" + fieldOf(poi, "poiLongitudeGcj02"),
+        "ct=" + fieldOf(a, "createTime"),
+    ).joinToString("|")
 }
