@@ -416,3 +416,12 @@ v18 仍然报「V2: 取不到 IMessageUtils」。反查 36.8.0 的 dex：
 ——36.8.0 把工厂挪到了混淆类 `X.12pl`，`MultiInstanceHelperKt` 里只剩 `LIZ()`→IConversationListModel、`LIZIZ()`→IConversationModelMultiInstanceExt。
 
 改动：utils 入口按候选列表试 `X.12pl` → `MultiInstanceHelperKt`，命中哪个上报哪个。
+
+## v20 — 诊断版：整条链路全量上报（2026-10-30）
+
+一次装包就能定位问题，不用再让用户发 spark.log。
+
+新增 `diag()`：本地日志 + 上报服务器（stage=diag）。埋点位置：
+- utils 候选类是否存在、类里所有静态无参方法的返回类型、调用结果/异常
+- 会话对象类型、builder 类型、convSet、content、message 类型
+- utils 实例、sendMessage 调用前后、onSuccess / onFailure（含 IMError 内容）、回调超时

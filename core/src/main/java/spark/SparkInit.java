@@ -471,37 +471,40 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     private Object resolveMessageUtils(ClassLoader cl) {
-        // 36.8.0 实测：IMessageUtils 的工厂在 X.12pl.LIZ()（反编译 dex 里 invoke-static 查到的）
-        // 其它版本在 com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt，两个都试
-        String[] candidates = new String[]{
-                "X.12pl",
-                "com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt"
-        };
+        String[] candidates = new String[]{"X.12pl", "com.bytedance.ies.im.core.sdk.MultiInstanceHelperKt"};
         for (String cn : candidates) {
+            Class<?> helper;
             try {
-                Class<?> helper = XposedHelpers.findClass(cn, cl);
-                for (java.lang.reflect.Method m : helper.getMethods()) {
-                    if (!java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
-                    if (m.getParameterCount() != 0) continue;
-                    if (!"com.bytedance.im.core.internal.utils.IMessageUtils".equals(m.getReturnType().getName())) continue;
-                    Object o = m.invoke(null);
-                    if (o != null) {
-                        log("IMessageUtils: " + cn + "." + m.getName());
-                        progress("step", "V2: utils 来自 " + cn + "." + m.getName());
-                        return o;
-                    }
-                }
+                helper = XposedHelpers.findClass(cn, cl);
             } catch (Throwable t) {
-                log("取 utils 失败 " + cn + ": " + t);
+                diag("utils: " + cn + " 类不存在 -> " + t);
+                continue;
             }
+            diag("utils: " + cn + " 类存在");
+            int dumped = 0;
+            for (java.lang.reflect.Method m : helper.getMethods()) {
+                if (!java.lang.reflect.Modifier.isStatic(m.getModifiers()) || m.getParameterCount() != 0) continue;
+                String rt = m.getReturnType().getName();
+                if (dumped++ < 12) diag("utils: " + cn + "." + m.getName() + " -> " + rt);
+                if (!"com.bytedance.im.core.internal.utils.IMessageUtils".equals(rt)) continue;
+                try {
+                    Object o = m.invoke(null);
+                    diag("utils: " + cn + "." + m.getName() + " 返回 " + (o == null ? "null" : o.getClass().getName()));
+                    if (o != null) return o;
+                } catch (Throwable t) {
+                    diag("utils: 调用 " + cn + "." + m.getName() + " 抛 " + t);
+                }
+            }
+            diag("utils: " + cn + " 里没有返回 IMessageUtils 的静态无参方法");
         }
-        progress("step", "V2: utils 入口全失败（X.12pl / MultiInstanceHelperKt）");
+        diag("utils: 所有候选入口都失败");
         return null;
     }
 
     /** 返回 2=成功 3=失败回调 1=超时 -1=环境不支持（调用方回退老路径） */
     private int sendTextV2(ClassLoader cl, Object client, String conversationId, String text) {
         Object conv = resolveConversation(cl, conversationId);
+        diag("V2: 会话对象 " + (conv == null ? "null" : conv.getClass().getName()));
         if (conv == null) return -1;
 
         try {
@@ -530,11 +533,14 @@ public class SparkInit implements IXposedHookLoadPackage {
                 if (!("conversation".equals(n) || "setConversation".equals(n) || "LIZ".equals(n))) continue;
                 try { m.invoke(builder, conv); convSet = true; break; } catch (Throwable ignored) { }
             }
+            diag("V2: convSet=" + convSet + " builder=" + builder.getClass().getName());
             if (!convSet) { log("builder 不接受会话对象"); return -1; }
 
+            diag("V2: content=" + contentJson);
             XposedHelpers.callMethod(builder, M_MSGTYPE, TYPE_TEXT);
             XposedHelpers.callMethod(builder, M_CONTENT, contentJson);
             Object msg = XposedHelpers.callMethod(builder, M_BUILD);
+            diag("V2: message=" + msg.getClass().getName());
 
             try { XposedHelpers.setObjectField(msg, "contentUpdateFrom", "message_builder"); } catch (Throwable ignored) { }
             try {
@@ -549,6 +555,7 @@ public class SparkInit implements IXposedHookLoadPackage {
 
             Object utils = resolveMessageUtils(cl);
             if (utils == null) { log("取不到 IMessageUtils"); progress("step", "V2: 取不到 IMessageUtils"); return -1; }
+            diag("V2: utils=" + utils.getClass().getName());
 
             Class<?> listenerCls = XposedHelpers.findClass("com.bytedance.im.core.client.callback.IRequestListener", cl);
             final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
@@ -559,9 +566,10 @@ public class SparkInit implements IXposedHookLoadPackage {
                         @Override
                         public Object invoke(Object p, java.lang.reflect.Method method, Object[] args) {
                             String n = method.getName();
-                            if ("onSuccess".equals(n)) { okFlag[0] = true; latch.countDown(); }
+                            if ("onSuccess".equals(n)) { okFlag[0] = true; diag("V2: onSuccess"); latch.countDown(); }
                             else if ("onFailure".equals(n)) {
                                 errMsg[0] = (args != null && args.length > 0) ? String.valueOf(args[0]) : "失败";
+                                diag("V2: onFailure " + errMsg[0]);
                                 latch.countDown();
                             }
                             return null;
@@ -573,10 +581,12 @@ public class SparkInit implements IXposedHookLoadPackage {
                 if ("sendMessage".equals(m.getName()) && m.getParameterCount() == 3) { send = m; break; }
             }
             if (send == null) { log("找不到 3 参 sendMessage"); return -1; }
+            diag("V2: 调用 sendMessage(" + msg.getClass().getSimpleName() + ")");
             send.invoke(utils, msg, new HashMap<String, String>(), proxy);
+            diag("V2: sendMessage 已返回，等回调");
 
             boolean done = latch.await(15, java.util.concurrent.TimeUnit.SECONDS);
-            if (!done) { log("发送回调超时 15 秒"); progress("step", "V2: 回调超时 15 秒"); return 1; }
+            if (!done) { log("发送回调超时 15 秒"); diag("V2: 回调超时 15 秒"); return 1; }
             if (okFlag[0]) { progress("step", "V2: 回调成功"); return 2; }
             log("发送失败回调: " + errMsg[0]);
             progress("step", "V2: 失败回调 " + errMsg[0]);
@@ -808,6 +818,12 @@ public class SparkInit implements IXposedHookLoadPackage {
     }
 
     /** 进度上报：每个阶段都打到服务端，出问题能看出卡在哪一步 */
+    /** 诊断：本地日志 + 上报服务器（装一次包就能看到全部细节，不用再发 spark.log） */
+    private void diag(String msg) {
+        log("[diag] " + msg);
+        progress("diag", msg);
+    }
+
     private void progress(String stage, String detail) {
         try {
             JSONObject o = new JSONObject();
