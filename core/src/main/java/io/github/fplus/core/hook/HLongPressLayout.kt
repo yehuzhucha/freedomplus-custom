@@ -253,9 +253,9 @@ class HLongPressLayout : BaseHook() {
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
-        if (currentAweme == null) {
-            currentAweme = resolveAwemeFromView(view) ?: aweme
-        }
+        // 每次长按都从视图重新定位当前视频，不能只在 null 时取——
+        // 缓存可能是上一条视频的，会出现"同一视频两次属地不同"
+        resolveAwemeFromView(view)?.let { currentAweme = it }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -322,7 +322,12 @@ class HLongPressLayout : BaseHook() {
             "视频信息" -> {
                 singleLaunchMain("$item") {
                     val a = currentAweme ?: aweme
-                    val msg = "视频属地: ${a?.cityInfo()}\n发布时间: ${a?.createDate()}".trim()
+                    val msg = buildString {
+                        append("视频属地: ").append(a?.cityInfo())
+                        append("\nIP属地: ").append(a?.ipAttribution ?: "未提供")
+                        append("\n发布时间: ").append(a?.createDate())
+                        append("\n视频ID: ").append(a?.aid ?: "未知")
+                    }
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
