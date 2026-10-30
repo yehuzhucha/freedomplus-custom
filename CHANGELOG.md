@@ -25,8 +25,11 @@
 - `api.ip33.com` 已失效（DNS 都解析不出来），属地查询改走自建中转 `https://www.ccios.de/area/?code=<city>`。
 
 ### 续火花
-- **会话查询在 36.8.0 上会挂**：`getConversationListModel()` 返回 null 甚至不返回，`waitConversation` 等满 180 秒后抛「会话未出现在本地模型」。
-  → 不再查会话，直接用 `builder.conversationId(String)` 设置（30.9.0 时代的老做法）。
+- **会话查询在 36.8.0 上会挂**：`getConversationListModel()` 返回 null 甚至不返回 → 改用 `ConversationListModel.Companion.inst.getConversation(cid)` 取真实会话对象。
+- **只传 `conversationId` 字符串的消息不会投递**：服务端收下请求，但消息永远卡在 `status=1`。必须 `builder.conversation(conv)` + `TextContent` + `GsonUtil.toJson()` 组装。
+- **`IMessageUtils` 的工厂在混淆类 `X.12pl.LIZ()`**，`MultiInstanceHelperKt` 里只有 `LIZ()`/`LIZIZ()`，照抄上游会取不到。
+- **发送间隔 10~20 秒即可**：10 个目标 2~6 分钟全部送达；曾误判为「发太快被限流」，把间隔拉到 90~180 秒仍失败，证明与频率无关。
+- 完整排查过程、错误链路、时间线见 `docs/续火花排查记录-2026-10-30.md`。
 - Android 13+ 抖音没有 `MANAGE_EXTERNAL_STORAGE`，`/sdcard/Download` 写不进去：
   日志、已发记录、今日标记、锁文件统一改到 `getExternalFilesDir(null)`，**否则每次重开抖音都会重发一遍**。
 - 提速：启动等待 60s→10s，消息状态轮询 60s→12s，全员已发直接跳过。
