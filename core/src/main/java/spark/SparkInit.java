@@ -303,10 +303,16 @@ public class SparkInit implements IXposedHookLoadPackage {
             int ok = 0, fail = 0;
 
             Set<String> sentToday = loadSentToday();
-            if (CFG != null && CFG.optBoolean("force", false)) {
+            // force = 只绕过「今天已跑过」的门禁，已发成功的人仍然跳过（补发缺失的）
+            // forceAll = 连今日已发记录一起清空（全部重发）
+            boolean forceAll = CFG != null && CFG.optBoolean("forceAll", false);
+            if (forceAll) {
                 sentToday.clear();
-                log("force=true，忽略今日已发记录，全部重发");
-                progress("step", "force=true 全部重发");
+                log("forceAll=true，清空今日已发记录，全部重发");
+                progress("step", "forceAll=true 全部重发");
+            } else if (!sentToday.isEmpty()) {
+                log("今日已发 " + sentToday.size() + " 个，本次只补发剩下的");
+                progress("step", "今日已发 " + sentToday.size() + " 个，只补发剩下的");
             }
             if (sentToday.containsAll(targets)) {
                 log("今天已全部发过（" + sentToday.size() + " 个），跳过");
@@ -322,6 +328,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                 if (sentToday.contains(cid)) {
                     skipped++;
                     log("(" + (i + 1) + "/" + targets.size() + ") 今天已发过，跳过: " + cid);
+                    progress("skip_one", (i + 1) + "/" + targets.size() + " " + cid);
                     continue;
                 }
                 try {
@@ -367,7 +374,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                     + "\n文案: " + text + "\n");
             if (fail == 0) {
                 writeFile(DAYF, today);
-                if (force && forceTag.length() > 0) writeFile(FORCEF, forceTag);
+                if ((force || forceAll) && forceTag.length() > 0) writeFile(FORCEF, forceTag);
             } else {
                 log("有 " + fail + " 个失败，不写日期标记，下次启动会自动补发");
                 progress("step", "有失败 " + fail + " 个，保留重试机会");
