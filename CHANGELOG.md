@@ -386,3 +386,12 @@
   —— v14 把等待砍到 10 秒，IM 长连接未就绪就提交，消息实际发不出去，这是本次漏发的直接原因
 - 云端配置新增 `force: true`：忽略今日已发记录，全部重发
 - 失败上报 `send_fail` 带 status，日志里能看到真实状态
+
+## v16 — force 必须能绕过日期门禁（2026-10-30）
+
+现象：装完 v15 后日志只刷 `already 2026-10-30 已跑过`，没有 start/after_wait，新逻辑根本没执行。
+
+根因：`daily()` 开头的日期门禁（`today == spark.day` 就 return）在拉配置之前，
+`force` 是后面才读的，所以 force 永远救不了当天。
+
+改动：先 fetchConfig → 读 force → 再判断日期门禁；force=true 时跳过门禁并清空今日已发记录。

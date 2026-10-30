@@ -224,7 +224,21 @@ public class SparkInit implements IXposedHookLoadPackage {
         if (new File(OFF).exists()) { log("关停开关存在（" + OFF + "），跳过"); return; }
 
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
-        if (today.equals(readFile(DAYF).trim())) { log("今天已跑过，跳过"); progress("already", today + " 已跑过"); return; }
+
+        // 先拉云端配置：force 必须能绕过「今天已跑过」这道门禁，
+        // 否则装完新版本当天也永远进不到发送逻辑（日志只会刷 already）。
+        JSONObject cfg0 = fetchConfig();
+        if (cfg0 == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
+        CFG = cfg0;
+        boolean force = cfg0.optBoolean("force", false);
+
+        if (!force && today.equals(readFile(DAYF).trim())) {
+            log("今天已跑过，跳过");
+            progress("already", today + " 已跑过");
+            return;
+        }
+        if (force) { log("force=true，忽略今日已跑记录"); progress("step", "force=true 强制重跑"); }
+        if (!cfg0.optBoolean("enabled", true)) { log("云端开关是关的，跳过"); progress("skip", "云端开关关闭"); return; }
 
         try {
             File lf = new File(LOCK);
@@ -244,11 +258,8 @@ public class SparkInit implements IXposedHookLoadPackage {
             log("等 60 秒让 IM 长连接就绪…");
             Thread.sleep(60000L);
 
-            progress("after_wait", "60 秒等待结束，开始拉配置");
-            JSONObject cfg = fetchConfig();
-            if (cfg == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
-            CFG = cfg;
-            if (!cfg.optBoolean("enabled", true)) { log("云端开关是关的，跳过"); progress("skip", "云端开关关闭"); return; }
+            progress("after_wait", "60 秒等待结束，开始发送");
+            JSONObject cfg = CFG;
 
             String text = "[续火花吧]";
             JSONArray msgs = cfg.optJSONArray("messages");
