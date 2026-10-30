@@ -23,6 +23,7 @@ import io.github.fplus.core.helper.DexkitBuilder
 import io.github.fplus.core.helper.ModuleSettingHelper
 import io.github.fplus.core.hook.logic.DownloadLogic
 import io.github.fplus.core.hook.logic.cityInfo
+import io.github.fplus.core.hook.logic.preciseLocation
 import io.github.fplus.core.hook.logic.createDate
 import io.github.xpler.core.XplerLog
 import io.github.xpler.core.hookBlockRunning
@@ -322,12 +323,7 @@ class HLongPressLayout : BaseHook() {
             "视频信息" -> {
                 singleLaunchMain("$item") {
                     val a = currentAweme ?: aweme
-                    val msg = buildString {
-                        append("视频属地: ").append(a?.cityInfo())
-                        append("\nIP属地: ").append(a?.ipAttribution ?: "未提供")
-                        append("\n发布时间: ").append(a?.createDate())
-                        append("\n视频ID: ").append(a?.aid ?: "未知")
-                    }
+                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()}"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",

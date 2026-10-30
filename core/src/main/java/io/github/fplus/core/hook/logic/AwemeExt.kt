@@ -164,3 +164,60 @@ fun Aweme.sortString(): String {
     val desc = "$desc".replace(Regex("\\s"), "")
     return "awemeType=${awemeType}, desc=$desc"
 }
+
+/** geohash → 经纬度（纯计算，不需要网络） */
+fun decodeGeohash(geohash: String): Pair<Double, Double>? {
+    val base32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+    var latMin = -90.0; var latMax = 90.0
+    var lonMin = -180.0; var lonMax = 180.0
+    var even = true
+    for (ch in geohash.lowercase()) {
+        val idx = base32.indexOf(ch)
+        if (idx < 0) return null
+        for (bit in 4 downTo 0) {
+            val mask = 1 shl bit
+            if (even) {
+                val mid = (lonMin + lonMax) / 2
+                if (idx and mask != 0) lonMin = mid else lonMax = mid
+            } else {
+                val mid = (latMin + latMax) / 2
+                if (idx and mask != 0) latMin = mid else latMax = mid
+            }
+            even = !even
+        }
+    }
+    return ((latMin + latMax) / 2) to ((lonMin + lonMax) / 2)
+}
+
+private fun reflect(o: Any?, name: String): Any? {
+    if (o == null) return null
+    var c: Class<*>? = o.javaClass
+    while (c != null) {
+        try {
+            val f = c.getDeclaredField(name)
+            f.isAccessible = true
+            return f.get(o)
+        } catch (_: Throwable) { }
+        c = c.superclass
+    }
+    return null
+}
+
+/** 精确属地：省 市 街道 小区（POI 优先，其次 geohash 逆地理编码，都没有就只到市） */
+suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
+    val base = cityInfo()
+    runCatching {
+        val poi = reflect(this@preciseLocation, "poiStruct") ?: reflect(this@preciseLocation, "poiAnchorStructV2")
+        val poiName = (reflect(poi, "poiName") as? String)?.trim().orEmpty()
+        if (poiName.isNotEmpty()) return@withContext listOf(base, poiName).filter { it.isNotBlank() }.joinToString(" ")
+
+        val gh = (reflect(this@preciseLocation, "geohash") as? String)?.trim().orEmpty()
+        if (gh.isEmpty()) return@withContext base
+        val ll = decodeGeohash(gh) ?: return@withContext base
+        val json = KHttpUtils.get("https://www.ccios.de/geo/?lat=${ll.first}&lng=${ll.second}").parseJSON()
+        val street = json.getStringOrDefault("street")
+        val road = json.getStringOrDefault("road")
+        val near = json.getStringOrDefault("poi")
+        listOf(base, street, road, near).filter { it.isNotBlank() }.distinct().joinToString(" ")
+    }.getOrElse { base }
+}
