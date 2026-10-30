@@ -350,7 +350,12 @@ public class SparkInit implements IXposedHookLoadPackage {
                     "时间: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(new Date())
                     + "\n好友数: " + targets.size() + "\n成功: " + ok + "\n失败: " + fail
                     + "\n文案: " + text + "\n");
-            writeFile(DAYF, today);
+            if (fail == 0) {
+                writeFile(DAYF, today);
+            } else {
+                log("有 " + fail + " 个失败，不写日期标记，下次启动会自动补发");
+                progress("step", "有失败 " + fail + " 个，保留重试机会");
+            }
             report(ok, fail, targets.size(), text);
 
         } catch (Throwable t) {
