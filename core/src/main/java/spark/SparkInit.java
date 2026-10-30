@@ -325,11 +325,18 @@ public class SparkInit implements IXposedHookLoadPackage {
                     continue;
                 }
                 try {
-                    int st = sendText(cl, cid, text);
+                    Object imClient = getClient(cl);
+                    int st = imClient == null ? -1 : sendTextV2(cl, imClient, cid, text);
+                    if (st == -1) {
+                        log("V2 链路不可用，回退老路径: " + cid);
+                        st = sendText(cl, cid, text);
+                    }
                     if (st != 2 && st != 5) {
                         log("状态 " + st + "，8 秒后重试一次: " + cid);
                         Thread.sleep(8000L);
-                        st = sendText(cl, cid, text);
+                        Object imClient2 = getClient(cl);
+                        st = imClient2 == null ? -1 : sendTextV2(cl, imClient2, cid, text);
+                        if (st == -1) st = sendText(cl, cid, text);
                     }
                     if (st == 2 || st == 5) {
                         markSent(cid);
@@ -430,6 +437,134 @@ public class SparkInit implements IXposedHookLoadPackage {
             log("读消息状态失败: " + t);
         }
         return st;
+    }
+
+    // ===================== v17：按星火燎原的发送链路 =====================
+    // 1) 取真实 Conversation 对象（字符串 ID 会让消息卡在「发送中」）
+    // 2) TextContent + GsonUtil 序列化，而不是手写 JSON
+    // 3) IRequestListener 回调等结果，不轮询 getMsgStatus
+
+    private Object resolveConversation(ClassLoader cl, String cid) {
+        try {
+            Class<?> api = XposedHelpers.findClass("com.bytedance.ies.im.core.api.client.ConversationListModel", cl);
+            Object companion = XposedHelpers.getStaticObjectField(api, "Companion");
+            Object inst = XposedHelpers.callMethod(companion, "getInst");
+            if (inst != null) {
+                Object conv = XposedHelpers.callMethod(inst, "getConversation", cid);
+                if (conv != null) { log("会话对象: 路径1 命中"); return conv; }
+            }
+        } catch (Throwable t) { log("会话对象路径1失败: " + t); }
+        try {
+            Class<?> sdk = XposedHelpers.findClass("com.bytedance.ies.im.core.sdk.SDKManager", cl);
+            Object inst = XposedHelpers.getStaticObjectField(sdk, "INSTANCE");
+            Object client = XposedHelpers.callMethod(inst, "getImSdkClient");
+            Object svc = XposedHelpers.callMethod(client, "getIIMSdkModelService");
+            Object model = XposedHelpers.callMethod(svc, "getConversationListModel");
+            Object conv = XposedHelpers.callMethod(model, "getConversation", cid);
+            if (conv != null) { log("会话对象: 路径2 命中"); return conv; }
+        } catch (Throwable t) { log("会话对象路径2失败: " + t); }
+        return null;
+    }
+
+    private Object resolveMessageUtils(ClassLoader cl) {
+        try {
+            Class<?> u = XposedHelpers.findClass("com.bytedance.im.core.internal.utils.IMessageUtils", cl);
+            for (java.lang.reflect.Method m : u.getDeclaredMethods()) {
+                if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        && m.getParameterCount() == 0
+                        && m.getReturnType() == u) {
+                    Object o = m.invoke(null);
+                    if (o != null) return o;
+                }
+            }
+        } catch (Throwable t) { log("取 IMessageUtils 失败: " + t); }
+        return null;
+    }
+
+    /** 返回 2=成功 3=失败回调 1=超时 -1=环境不支持（调用方回退老路径） */
+    private int sendTextV2(ClassLoader cl, Object client, String conversationId, String text) {
+        Object conv = resolveConversation(cl, conversationId);
+        if (conv == null) return -1;
+
+        try {
+            Object beanSvc = XposedHelpers.callMethod(client, M_BEANSVC);
+            Object builder = XposedHelpers.callMethod(beanSvc, M_NEWBLD);
+
+            String contentJson = null;
+            try {
+                Class<?> tc = XposedHelpers.findClass("com.ss.android.ugc.aweme.im.sdk.chat.model.TextContent", cl);
+                Object content = tc.getDeclaredConstructor().newInstance();
+                XposedHelpers.callMethod(content, "setText", text);
+                Class<?> gu = XposedHelpers.findClass("com.bytedance.ies.im.core.api.utils.GsonUtil", cl);
+                Object gson = XposedHelpers.getStaticObjectField(gu, "INSTANCE");
+                contentJson = (String) XposedHelpers.callMethod(gson, "toJson", content);
+                try { XposedHelpers.setObjectField(builder, "contentObj", content); } catch (Throwable ignored) { }
+            } catch (Throwable t) {
+                log("TextContent 失败，回退手写 JSON: " + t);
+            }
+            if (contentJson == null) contentJson = "{\"text\":" + jsonString(text) + ",\"type\":700}";
+
+            boolean convSet = false;
+            for (java.lang.reflect.Method m : builder.getClass().getMethods()) {
+                if (m.getParameterCount() != 1) continue;
+                if (!m.getParameterTypes()[0].isInstance(conv)) continue;
+                String n = m.getName();
+                if (!("conversation".equals(n) || "setConversation".equals(n) || "LIZ".equals(n))) continue;
+                try { m.invoke(builder, conv); convSet = true; break; } catch (Throwable ignored) { }
+            }
+            if (!convSet) { log("builder 不接受会话对象"); return -1; }
+
+            XposedHelpers.callMethod(builder, M_MSGTYPE, TYPE_TEXT);
+            XposedHelpers.callMethod(builder, M_CONTENT, contentJson);
+            Object msg = XposedHelpers.callMethod(builder, M_BUILD);
+
+            try {
+                Object ext = XposedHelpers.callMethod(msg, "getExt");
+                if (ext instanceof java.util.Map) {
+                    long now = System.currentTimeMillis();
+                    ((java.util.Map) ext).put("old_client_message_id", String.valueOf(now));
+                    ((java.util.Map) ext).put("im_client_send_msg_time", String.valueOf(now));
+                    ((java.util.Map) ext).put("a:ntp_ready", "0");
+                }
+            } catch (Throwable ignored) { }
+
+            Object utils = resolveMessageUtils(cl);
+            if (utils == null) { log("取不到 IMessageUtils"); return -1; }
+
+            Class<?> listenerCls = XposedHelpers.findClass("com.bytedance.im.core.client.callback.IRequestListener", cl);
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            final boolean[] okFlag = new boolean[]{false};
+            final String[] errMsg = new String[]{null};
+            Object proxy = java.lang.reflect.Proxy.newProxyInstance(cl, new Class<?>[]{listenerCls},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object p, java.lang.reflect.Method method, Object[] args) {
+                            String n = method.getName();
+                            if ("onSuccess".equals(n)) { okFlag[0] = true; latch.countDown(); }
+                            else if ("onFailure".equals(n)) {
+                                errMsg[0] = (args != null && args.length > 0) ? String.valueOf(args[0]) : "失败";
+                                latch.countDown();
+                            }
+                            return null;
+                        }
+                    });
+
+            java.lang.reflect.Method send = null;
+            for (java.lang.reflect.Method m : utils.getClass().getMethods()) {
+                if ("sendMessage".equals(m.getName()) && m.getParameterCount() == 3) { send = m; break; }
+            }
+            if (send == null) { log("找不到 3 参 sendMessage"); return -1; }
+            send.invoke(utils, msg, new HashMap<String, String>(), proxy);
+
+            boolean done = latch.await(15, java.util.concurrent.TimeUnit.SECONDS);
+            if (!done) { log("发送回调超时 15 秒"); return 1; }
+            if (okFlag[0]) return 2;
+            log("发送失败回调: " + errMsg[0]);
+            return 3;
+        } catch (Throwable t) {
+            log("sendTextV2 异常: " + t);
+            return -1;
+        }
     }
 
     /** 发送消息：30.9~35.9 走 IMHandlerCenter.sendMessage；40.x 走 SendMsgHandler(IMSdkContext).send */

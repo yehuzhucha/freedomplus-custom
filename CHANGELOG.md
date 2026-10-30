@@ -397,3 +397,14 @@
 改动：先 fetchConfig → 读 force → 再判断日期门禁；force=true 时跳过门禁并清空今日已发记录。
 - 追加：有失败时不写日期标记（`fail>0` 保留重试机会，下次启动自动补发失败的）
 - force 幂等：用配置 `updatedAt` 打标记，只生效一次，避免留在配置里每次开抖音都全量重发
+
+## v17 — 发送链路改用星火燎原（SparkFlame）的写法（2026-10-30）
+
+现象：消息提交后长期卡在 `status=1`（发送中），对端收不到；日志里 status=1 占多数。
+
+对照开源项目 SparkFlame（github.com/WorldMargin/SparkFlame，Apache-2.0）的 `ImMsgBridge`，三处差异：
+1. 它用真实 `Conversation` 对象（`ConversationListModel.Companion.inst.getConversation(id)`）设进 builder，我们只塞了会话 ID 字符串
+2. 它用 `TextContent` + `GsonUtil.toJson()` 生成 content，我们手写 `{"text":..,"type":700}`
+3. 它用 `IMessageUtils.sendMessage(msg, map, IRequestListener)` 等回调（15s），我们轮询 `getMsgStatus()`（这个调用本身会卡死）
+
+改动：新增 `sendTextV2()`（三段链路），失败返回 -1 时回退老的 `sendText()`；会话对象取不到直接报失败，不硬发。
