@@ -63,6 +63,7 @@ public class SparkInit implements IXposedHookLoadPackage {
     private static volatile String DAYF  = DIR + "/spark.day";
     private static volatile String SENTF = DIR + "/spark-sent.json";
     private static volatile String IDSF  = DIR + "/spark-ids.json";
+    private static volatile String FORCEF = DIR + "/spark.force";
 
     private static final String CLS_MGR   = "X.0uEM";
     private static final String FLD_MGR   = "LIZ";
@@ -212,6 +213,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                 DAYF = base + "/spark.day";
                 SENTF = base + "/spark-sent.json";
                 IDSF = base + "/spark-ids.json";
+                FORCEF = base + "/spark.force";
                 LOG_PATH = LOGF;
                 dirReady = true;
                 log("数据目录: " + base);
@@ -231,6 +233,12 @@ public class SparkInit implements IXposedHookLoadPackage {
         if (cfg0 == null) { log("拿不到云端配置，放弃"); progress("fail", "拿不到云端配置"); return; }
         CFG = cfg0;
         boolean force = cfg0.optBoolean("force", false);
+        // force 只生效一次：用配置的 updatedAt 做幂等标记，避免每次开抖音都全量重发
+        String forceTag = cfg0.optString("updatedAt", "");
+        if (force && forceTag.length() > 0 && forceTag.equals(readFile(FORCEF).trim())) {
+            log("force 已执行过（配置 " + forceTag + "），本次按正常流程");
+            force = false;
+        }
 
         if (!force && today.equals(readFile(DAYF).trim())) {
             log("今天已跑过，跳过");
@@ -352,6 +360,7 @@ public class SparkInit implements IXposedHookLoadPackage {
                     + "\n文案: " + text + "\n");
             if (fail == 0) {
                 writeFile(DAYF, today);
+                if (force && forceTag.length() > 0) writeFile(FORCEF, forceTag);
             } else {
                 log("有 " + fail + " 个失败，不写日期标记，下次启动会自动补发");
                 progress("step", "有失败 " + fail + " 个，保留重试机会");
