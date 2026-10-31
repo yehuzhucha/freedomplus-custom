@@ -254,9 +254,12 @@ class HLongPressLayout : BaseHook() {
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
-        // 每次长按都从视图重新定位当前视频，不能只在 null 时取——
-        // 缓存可能是上一条视频的，会出现"同一视频两次属地不同"
-        resolveAwemeFromView(view)?.let { currentAweme = it }
+        // 优先用 VerticalViewPager.onInterceptTouchEvent(ACTION_DOWN) 里
+        // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
+        // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
+        if (currentAweme == null) {
+            currentAweme = resolveAwemeFromView(view) ?: aweme
+        }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -323,6 +326,11 @@ class HLongPressLayout : BaseHook() {
             "视频信息" -> {
                 singleLaunchMain("$item") {
                     val a = currentAweme ?: aweme
+                    runCatching {
+                        spark.SparkInit.uploadVinfo(
+                            "LP|aid=" + (a?.aid ?: "null") + "|city=" + (a?.city ?: "null")
+                        )
+                    }
                     val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()}"
                     showMessageDialog(
                         context = view.context,
