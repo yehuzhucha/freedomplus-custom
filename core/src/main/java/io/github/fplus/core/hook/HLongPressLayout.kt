@@ -8,6 +8,8 @@ import android.widget.TextView
 import androidx.core.view.children
 import androidx.core.view.isVisible
 import com.freegang.extension.asOrNull
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import com.freegang.extension.findFieldGetValue
 import com.freegang.extension.firstParentOrNull
 import com.freegang.extension.forEachChild
