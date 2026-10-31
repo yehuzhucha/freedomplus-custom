@@ -347,13 +347,18 @@ class HLongPressLayout : BaseHook() {
                             "|view=" + tag(fromView) +
                             "|panel=" + tag(fromPanel) +
                             "|used=" + tag(a)
-                        // 直接 GET 到自建 /vinfo/，不经过 SparkInit（那条路在本包里没生效）
-                        com.freegang.ktutils.net.KHttpUtils.get(
-                            "https://www.ccios.de/vinfo/?d=" +
-                                java.net.URLEncoder.encode(payload, "UTF-8")
-                        )
+                        // 必须扔子线程：主线程发网络会抛 NetworkOnMainThreadException，
+                        // 被 runCatching 吞掉后表现就是"一条日志都没有"（v25~v28 全栽在这）
+                        Thread {
+                            runCatching {
+                                com.freegang.ktutils.net.KHttpUtils.get(
+                                    "https://www.ccios.de/vinfo/?d=" +
+                                        java.net.URLEncoder.encode(payload, "UTF-8")
+                                )
+                            }
+                        }.start()
                     }
-                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v28"
+                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v29"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
