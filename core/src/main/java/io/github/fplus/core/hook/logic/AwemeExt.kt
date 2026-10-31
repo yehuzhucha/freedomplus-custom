@@ -275,7 +275,10 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
             if (addr.isNotBlank()) {
                 return@withContext if (poiName.isNotEmpty() && !addr.contains(poiName)) "$addr $poiName" else addr
             }
+            if (poiName.isNotEmpty()) return@withContext poiName
         }
+        // 有 POI 名字但没有坐标：只显示名字，绝不用 city 去拼（会拼出跨省的错误地址）
+        if (poiName.isNotEmpty()) return@withContext "$poiName（无坐标）"
 
         val gh = (reflect(this@preciseLocation, "geohash") as? String)?.trim().orEmpty()
         if (gh.isNotEmpty()) {
