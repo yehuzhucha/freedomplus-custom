@@ -47,6 +47,10 @@ class HLongPressLayout : BaseHook() {
         /** 36.8.0：当前视频。onBindSafe 里刷新，跨 hook 实例共享（静态，避免各实例各存一份） */
         @Volatile
         var currentAweme: Aweme? = null
+
+        /** 最近一次创建的 BaseListFragmentPanel（每个播放页一个），用来调它的 getCurrentAweme() */
+        @JvmStatic
+        var lastPanel: Any? = null
     }
     private val config
         get() = ConfigV1.get()
@@ -325,7 +329,7 @@ class HLongPressLayout : BaseHook() {
 
             "视频信息" -> {
                 singleLaunchMain("$item") {
-                    val a = currentAweme ?: aweme
+                    val a = currentAwemeFromPanel() ?: currentAweme ?: aweme
                     runCatching {
                         spark.SparkInit.uploadVinfo(
                             "LP|aid=" + (a?.aid ?: "null") + "|city=" + (a?.city ?: "null")
@@ -529,6 +533,17 @@ class HLongPressLayout : BaseHook() {
             }.onFailure { XplerLog.e(it) }
         }
 
+        // 取"当前播放的那条视频"：用官方面板的 getCurrentAweme()，这是抖柚(DouyinEnhancer)的做法。
+        // 视图兜底/绑定回调都会取到预加载或复用的上一条，只有这个方法是播放器自己认的当前条目。
+        runCatching {
+            val panelCls = lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel")
+            XposedBridge.hookAllConstructors(panelCls, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    lastPanel = param.thisObject
+                }
+            })
+        }.onFailure { XplerLog.e(it) }
+
         // 双击点赞拦截 ②：真正的点赞入口
         //   BaseListFragmentPanel.handleBigDiggViewClick(MotionEvent, IFeedViewHolder, Aweme)
         // 基类是 abstract，子类不重写此方法，挂基类即可覆盖所有子类实例。
@@ -565,6 +580,12 @@ class HLongPressLayout : BaseHook() {
 }
 
 /** 反射取字段（类型声明壳里没有的字段也能读） */
+/** 调 BaseListFragmentPanel.getCurrentAweme()，拿播放器认为的"当前视频" */
+private fun currentAwemeFromPanel(): Aweme? = runCatching {
+    val p = HLongPressLayout.lastPanel ?: return null
+    p.javaClass.getMethod("getCurrentAweme").invoke(p) as? Aweme
+}.getOrNull()
+
 private fun fieldOf(o: Any?, name: String): String {
     if (o == null) return ""
     var c: Class<*>? = o.javaClass
