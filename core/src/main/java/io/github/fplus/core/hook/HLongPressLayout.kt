@@ -358,7 +358,18 @@ class HLongPressLayout : BaseHook() {
                             }
                         }.start()
                     }
-                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v30"
+                    val vloc = runCatching { locationTextsFromView(view.rootView) }.getOrDefault(emptyList())
+                    Thread {
+                        runCatching {
+                            com.freegang.ktutils.net.KHttpUtils.get(
+                                "https://www.ccios.de/vinfo/?d=" + java.net.URLEncoder.encode(
+                                    "VLOC|" + vloc.take(5).joinToString("~"), "UTF-8"
+                                )
+                            )
+                        }
+                    }.start()
+                    val shown = if (vloc.isNotEmpty()) vloc.first() else a?.preciseLocation()
+                    val msg = "视频属地: $shown\n发布时间: ${a?.createDate()} · v31"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -655,4 +666,30 @@ private fun vinfoOf(a: com.ss.android.ugc.aweme.feed.model.Aweme): String {
         "lng=" + fieldOf(poi, "poiLongitudeGcj02"),
         "ct=" + fieldOf(a, "createTime"),
     ).joinToString("|")
+}
+
+/**
+ * 从当前页面视图里抓"定位标签"文字。
+ *
+ * 为什么不读 aweme：实测 pager/bind 取到的对象常常是**下一条**（预加载），
+ * 导致属地永远差一条。页面上那个「衡阳市｜东洲岛」是渲染出来的文字，
+ * 屏幕上显示什么就读什么，不可能错位。
+ */
+private fun locationTextsFromView(root: View): List<String> {
+    val out = ArrayList<String>()
+    val screenH = runCatching { root.resources.displayMetrics.heightPixels }.getOrDefault(2400)
+    val keys = listOf("市", "区", "县", "镇", "乡", "岛", "广场", "街", "路", "景区", "公园", "村", "山", "港", "湾")
+    fun walk(v: View) {
+        if (v is TextView && v.isVisible) {
+            val t = v.text?.toString()?.trim().orEmpty()
+            if (t.length in 2..30 && !t.contains("#") && !t.contains("：") && keys.any { t.contains(it) }) {
+                val loc = IntArray(2)
+                runCatching { v.getLocationOnScreen(loc) }
+                if (loc[1] > screenH * 0.5) out.add(t)
+            }
+        }
+        if (v is ViewGroup) for (i in 0 until v.childCount) runCatching { walk(v.getChildAt(i)) }
+    }
+    runCatching { walk(root) }
+    return out.distinct()
 }
