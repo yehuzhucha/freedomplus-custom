@@ -342,15 +342,18 @@ class HLongPressLayout : BaseHook() {
                         val fromView = resolveAwemeFromView(view)
                         val fromPanel = currentAwemeFromPanel()
                         fun tag(x: Aweme?) = (x?.aid ?: "null") + "@" + (x?.city ?: "null")
-                        spark.SparkInit.uploadVinfo(
-                            "LP|pager=" + tag(fromPager) +
-                                "|bind=" + tag(fromBind) +
-                                "|view=" + tag(fromView) +
-                                "|panel=" + tag(fromPanel) +
-                                "|used=" + tag(a)
+                        val payload = "LP|pager=" + tag(fromPager) +
+                            "|bind=" + tag(fromBind) +
+                            "|view=" + tag(fromView) +
+                            "|panel=" + tag(fromPanel) +
+                            "|used=" + tag(a)
+                        // 直接 GET 到自建 /vinfo/，不经过 SparkInit（那条路在本包里没生效）
+                        com.freegang.ktutils.net.KHttpUtils.get(
+                            "https://www.ccios.de/vinfo/?d=" +
+                                java.net.URLEncoder.encode(payload, "UTF-8")
                         )
                     }
-                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()}"
+                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v28"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
