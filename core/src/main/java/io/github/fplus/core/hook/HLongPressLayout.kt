@@ -53,6 +53,10 @@ class HLongPressLayout : BaseHook() {
         /** 最近一次创建的 BaseListFragmentPanel（每个播放页一个），用来调它的 getCurrentAweme() */
         @JvmStatic
         var lastPanel: Any? = null
+
+        /** 预先解析好的 getCurrentAweme() 方法，避免运行时再按名字反射（R8 可能把字符串优化掉） */
+        @JvmStatic
+        var getCurrentAwemeMethod: java.lang.reflect.Method? = null
     }
     private val config
         get() = ConfigV1.get()
@@ -333,8 +337,17 @@ class HLongPressLayout : BaseHook() {
                 singleLaunchMain("$item") {
                     val a = currentAwemeFromPanel() ?: currentAweme ?: aweme
                     runCatching {
+                        val fromPager = currentAweme
+                        val fromBind = aweme
+                        val fromView = resolveAwemeFromView(view)
+                        val fromPanel = currentAwemeFromPanel()
+                        fun tag(x: Aweme?) = (x?.aid ?: "null") + "@" + (x?.city ?: "null")
                         spark.SparkInit.uploadVinfo(
-                            "LP|aid=" + (a?.aid ?: "null") + "|city=" + (a?.city ?: "null")
+                            "LP|pager=" + tag(fromPager) +
+                                "|bind=" + tag(fromBind) +
+                                "|view=" + tag(fromView) +
+                                "|panel=" + tag(fromPanel) +
+                                "|used=" + tag(a)
                         )
                     }
                     val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()}"
@@ -539,6 +552,7 @@ class HLongPressLayout : BaseHook() {
         // 视图兜底/绑定回调都会取到预加载或复用的上一条，只有这个方法是播放器自己认的当前条目。
         runCatching {
             val panelCls = lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel")
+            getCurrentAwemeMethod = runCatching { panelCls.getMethod("getCurrentAweme") }.getOrNull()
             XposedBridge.hookAllConstructors(panelCls, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     lastPanel = param.thisObject
@@ -585,7 +599,8 @@ class HLongPressLayout : BaseHook() {
 /** 调 BaseListFragmentPanel.getCurrentAweme()，拿播放器认为的"当前视频" */
 private fun currentAwemeFromPanel(): Aweme? = runCatching {
     val p = HLongPressLayout.lastPanel ?: return null
-    p.javaClass.getMethod("getCurrentAweme").invoke(p) as? Aweme
+    val m = HLongPressLayout.getCurrentAwemeMethod ?: return null
+    m.invoke(p) as? Aweme
 }.getOrNull()
 
 private fun fieldOf(o: Any?, name: String): String {
