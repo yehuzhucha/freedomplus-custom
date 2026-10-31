@@ -259,26 +259,58 @@ private fun geoLookup(lat: Double, lng: Double): List<String> = runCatching {
  *   ③ 都没有      → 只显示 city 字段，并标注「仅市级」
  * 注意：绝不用 city 字段去拼 POI 名称——两者可能来自不同来源，会拼出「上海市 衡阳万达」这种错。
  */
+/** 按多个候选字段名取数值，兼容 Number / String —— 36.8.0 的 POI 经纬度不是 Double，强转会得到 0 */
+private fun numOf(obj: Any?, vararg names: String): Double? {
+    for (n in names) {
+        val v = reflect(obj, n) ?: continue
+        val d = when (v) {
+            is Number -> v.toDouble()
+            is String -> v.toDoubleOrNull()
+            else -> null
+        }
+        if (d != null && d != 0.0) return d
+    }
+    return null
+}
+
+/** POI 有名字没坐标时，用名字前向地理编码（自建 /fwd/，返回 WGS84） */
+private fun forwardGeocode(name: String): Pair<Double, Double>? = runCatching {
+    val url = "https://www.ccios.de/fwd/?q=" + java.net.URLEncoder.encode(name, "UTF-8")
+    val js = KHttpUtils.get(url).parseJSON()
+    if (!js.getStringOrDefault("ok").equals("true", true)) return@runCatching null
+    val la = js.getStringOrDefault("lat").toDoubleOrNull() ?: return@runCatching null
+    val ln = js.getStringOrDefault("lon").toDoubleOrNull() ?: return@runCatching null
+    la to ln
+}.getOrNull()
+
 suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
     runCatching {
         val poi = reflect(this@preciseLocation, "poiStruct")
             ?: reflect(this@preciseLocation, "poiAnchorStructV2")
             ?: reflect(this@preciseLocation, "poiAnchorStruct")
         val poiName = (reflect(poi, "poiName") as? String)?.trim().orEmpty()
-        val lat = (reflect(poi, "poiLatitudeGcj02") as? Double) ?: 0.0
-        val lng = (reflect(poi, "poiLongitudeGcj02") as? Double) ?: 0.0
+        val latG = numOf(poi, "poiLatitudeGcj02", "poiLatitude", "latitude")
+        val lngG = numOf(poi, "poiLongitudeGcj02", "poiLongitude", "longitude")
+        val lat = latG ?: 0.0
+        val lng = lngG ?: 0.0
 
         if (lat != 0.0 && lng != 0.0) {
             val (wlat, wlng) = gcj02ToWgs84(lat, lng)
             val parts = geoLookup(wlat, wlng)
             val addr = parts.filter { it.isNotBlank() }.joinToString(" ")
             if (addr.isNotBlank()) {
-                return@withContext if (poiName.isNotEmpty() && !addr.contains(poiName)) "$addr $poiName" else addr
+                return@withContext if (poiName.isNotEmpty() && !addr.contains(poiName)) "$poiName｜$addr" else addr
             }
             if (poiName.isNotEmpty()) return@withContext poiName
         }
-        // 有 POI 名字但没有坐标：只显示名字，绝不用 city 去拼（会拼出跨省的错误地址）
-        if (poiName.isNotEmpty()) return@withContext "$poiName（无坐标）"
+        // 有 POI 名字但没有坐标：拿名字前向地理编码，再反查街道
+        if (poiName.isNotEmpty()) {
+            forwardGeocode(poiName)?.let { (la, ln) ->
+                val addr = geoLookup(la, ln).filter { it.isNotBlank() }.joinToString(" ")
+                if (addr.isNotBlank()) return@withContext "$poiName｜$addr"
+            }
+            return@withContext poiName
+        }
 
         val gh = (reflect(this@preciseLocation, "geohash") as? String)?.trim().orEmpty()
         if (gh.isNotEmpty()) {
