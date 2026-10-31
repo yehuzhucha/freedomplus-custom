@@ -203,21 +203,89 @@ private fun reflect(o: Any?, name: String): Any? {
     return null
 }
 
-/** 精确属地：省 市 街道 小区（POI 优先，其次 geohash 逆地理编码，都没有就只到市） */
+/** GCJ-02 → WGS84（抖音 POI 坐标是火星坐标，Nominatim 要 WGS84，不转会偏几百米） */
+private const val PI = 3.1415926535897932384626
+private const val AXIS = 6378245.0
+private const val EE = 0.00669342162296594323
+
+private fun outOfChina(lat: Double, lng: Double) =
+    lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271
+
+private fun tLat(x: Double, y: Double): Double {
+    var r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
+    r += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0
+    r += (20.0 * Math.sin(y * PI) + 40.0 * Math.sin(y / 3.0 * PI)) * 2.0 / 3.0
+    r += (160.0 * Math.sin(y / 12.0 * PI) + 320.0 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0
+    return r
+}
+
+private fun tLng(x: Double, y: Double): Double {
+    var r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
+    r += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0
+    r += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0
+    r += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0
+    return r
+}
+
+fun gcj02ToWgs84(lat: Double, lng: Double): Pair<Double, Double> {
+    if (outOfChina(lat, lng)) return lat to lng
+    var dLat = tLat(lng - 105.0, lat - 35.0)
+    var dLng = tLng(lng - 105.0, lat - 35.0)
+    val radLat = lat / 180.0 * PI
+    var magic = Math.sin(radLat)
+    magic = 1 - EE * magic * magic
+    val sqrtMagic = Math.sqrt(magic)
+    dLat = (dLat * 180.0) / ((AXIS * (1 - EE)) / (magic * sqrtMagic) * PI)
+    dLng = (dLng * 180.0) / (AXIS / sqrtMagic * Math.cos(radLat) * PI)
+    return (lat - dLat) to (lng - dLng)
+}
+
+/** 逆地理编码：返回 省/市/区/街道/路 */
+private fun geoLookup(lat: Double, lng: Double): List<String> = runCatching {
+    val js = KHttpUtils.get("https://www.ccios.de/geo/?lat=$lat&lng=$lng").parseJSON()
+    listOf(
+        js.getStringOrDefault("province"),
+        js.getStringOrDefault("city"),
+        js.getStringOrDefault("district"),
+        js.getStringOrDefault("street"),
+        js.getStringOrDefault("road"),
+    )
+}.getOrElse { emptyList() }
+
+/**
+ * 精确属地。三条路，互不拼接：
+ *   ① POI 有坐标 → 用 POI 坐标逆地理编码（最准）
+ *   ② 有 geohash  → 解码后逆地理编码
+ *   ③ 都没有      → 只显示 city 字段，并标注「仅市级」
+ * 注意：绝不用 city 字段去拼 POI 名称——两者可能来自不同来源，会拼出「上海市 衡阳万达」这种错。
+ */
 suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
-    val base = cityInfo()
     runCatching {
-        val poi = reflect(this@preciseLocation, "poiStruct") ?: reflect(this@preciseLocation, "poiAnchorStructV2")
+        val poi = reflect(this@preciseLocation, "poiStruct")
+            ?: reflect(this@preciseLocation, "poiAnchorStructV2")
+            ?: reflect(this@preciseLocation, "poiAnchorStruct")
         val poiName = (reflect(poi, "poiName") as? String)?.trim().orEmpty()
-        if (poiName.isNotEmpty()) return@withContext listOf(base, poiName).filter { it.isNotBlank() }.joinToString(" ")
+        val lat = (reflect(poi, "poiLatitudeGcj02") as? Double) ?: 0.0
+        val lng = (reflect(poi, "poiLongitudeGcj02") as? Double) ?: 0.0
+
+        if (lat != 0.0 && lng != 0.0) {
+            val (wlat, wlng) = gcj02ToWgs84(lat, lng)
+            val parts = geoLookup(wlat, wlng)
+            val addr = parts.filter { it.isNotBlank() }.joinToString(" ")
+            if (addr.isNotBlank()) {
+                return@withContext if (poiName.isNotEmpty() && !addr.contains(poiName)) "$addr $poiName" else addr
+            }
+        }
 
         val gh = (reflect(this@preciseLocation, "geohash") as? String)?.trim().orEmpty()
-        if (gh.isEmpty()) return@withContext base
-        val ll = decodeGeohash(gh) ?: return@withContext base
-        val json = KHttpUtils.get("https://www.ccios.de/geo/?lat=${ll.first}&lng=${ll.second}").parseJSON()
-        val street = json.getStringOrDefault("street")
-        val road = json.getStringOrDefault("road")
-        val near = json.getStringOrDefault("poi")
-        listOf(base, street, road, near).filter { it.isNotBlank() }.distinct().joinToString(" ")
-    }.getOrElse { base }
+        if (gh.isNotEmpty()) {
+            decodeGeohash(gh)?.let { (la, ln) ->
+                val addr = geoLookup(la, ln).filter { it.isNotBlank() }.distinct().joinToString(" ")
+                if (addr.isNotBlank()) return@withContext addr
+            }
+        }
+
+        val base = cityInfo()
+        if (base.isBlank() || base.contains("未提供")) base else "$base（仅市级）"
+    }.getOrElse { cityInfo() }
 }
