@@ -59,6 +59,18 @@ class HLongPressLayout : BaseHook() {
          *  长按时顺着视图找到它自己那个 presenter，就不会拿到预加载的下一条。 */
         val boundByPresenter: MutableMap<Any, Aweme> = java.util.WeakHashMap()
 
+        /** 最近绑定过的 aweme（预加载会连续绑定多条，正确的往往就在里面） */
+        val recentAwemes: MutableList<Aweme> = java.util.Collections.synchronizedList(ArrayList())
+
+        fun rememberAweme(a: Aweme) {
+            synchronized(recentAwemes) {
+                if (recentAwemes.none { it.aid == a.aid }) {
+                    recentAwemes.add(a)
+                    if (recentAwemes.size > 6) recentAwemes.removeAt(0)
+                }
+            }
+        }
+
         /** 本次长按实际命中的取值来源：tag / view / presenter / global */
         @Volatile
         var lastSource: String = "none"
@@ -324,6 +336,27 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+    /**
+     * 用页面上的定位标签（如「贵港市」）在最近绑定的几条 aweme 里认领正确的那条。
+     *
+     * 为什么不直接信全局：预加载下一条会覆盖全局，导致永远差一条。
+     * 标签文字本身是准的（就是用户看到的那条视频），拿它当"选择器"，
+     * 选中后再从该 aweme 的内部 POI 取真实地址——显示出去的仍然是隐藏数据。
+     */
+    private suspend fun pickByTag(tag: String?): Aweme? {
+        if (tag.isNullOrBlank()) return null
+        val key = tag.replace("市", "").replace("区", "").replace("县", "").replace("省", "").take(4)
+        if (key.length < 2) return null
+        val cands = synchronized(recentAwemes) { recentAwemes.toList() }.reversed()
+        for (c in cands) {
+            val city = runCatching { c.cityInfo() }.getOrDefault("")
+            if (city.contains(key)) return c
+            val poi = runCatching { c.poiDebug() }.getOrDefault("")
+            if (poi.contains(key)) return c
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
@@ -422,21 +455,25 @@ class HLongPressLayout : BaseHook() {
                         }.start()
                     }
                     val vloc = runCatching { locationTextsFromView(view.rootView) }.getOrDefault(emptyList())
+                    val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
+                    val picked = pickByTag(tag)
+                    val aa = picked ?: a
+                    if (picked != null) lastSource = "tagmatch"
                     Thread {
                         runCatching {
                             com.freegang.ktutils.net.KHttpUtils.get(
                                 "https://www.ccios.de/vinfo/?d=" + java.net.URLEncoder.encode(
                                     "VLOC|" + vloc.take(5).joinToString("~") +
-                                        "|aid=" + (a?.aid ?: "null") +
-                                        "|poi=" + (a?.poiDebug() ?: "null") + "|src=" + lastSource, "UTF-8"
+                                        "|aid=" + (aa?.aid ?: "null") +
+                                        "|rawaid=" + (a?.aid ?: "null") +
+                                        "|poi=" + (aa?.poiDebug() ?: "null") + "|src=" + lastSource, "UTF-8"
                                 )
                             )
                         }
                     }.start()
-                    val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
-                    val msg = "视频属地: ${a?.preciseLocation()}\n" +
+                    val msg = "视频属地: ${aa?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${a?.createDate()} · v35"
+                        "发布时间: ${aa?.createDate()} · v36"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -631,6 +668,7 @@ class HLongPressLayout : BaseHook() {
                                     clz = clz.superclass
                                 }
                             }
+                            rememberAweme(a)
                             aweme = a
                             currentAweme = a
                             runCatching { spark.SparkInit.uploadVinfo(vinfoOf(a)) }
