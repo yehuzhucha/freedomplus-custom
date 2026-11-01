@@ -387,7 +387,7 @@ private val cityNameCache = java.util.concurrent.ConcurrentHashMap<String, Strin
 
 /** 快速取"作者省市"：只用城市码查表，不碰地图接口 */
 suspend fun Aweme.authorCityFast(): String = withContext(Dispatchers.IO) {
-    val code = this.city?.trim().orEmpty()
+    val code = this@authorCityFast.city?.trim().orEmpty()
     if (code.isEmpty()) return@withContext "未知"
     cityNameCache[code]?.let { return@withContext it }
     val r = runCatching {
