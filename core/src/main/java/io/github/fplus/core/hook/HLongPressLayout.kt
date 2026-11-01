@@ -549,7 +549,14 @@ class HLongPressLayout : BaseHook() {
                             }
                         }.start()
                     }
-                    val vloc = runCatching { locationTextsFromView(view.rootView) }.getOrDefault(emptyList())
+                    // 只扫当前条目所在的子树，避免把相邻页面的文字扫进来（之前扫 rootView 会串页）
+                    val itemRoot = runCatching {
+                        var p: View? = view
+                        var n = 0
+                        while (p?.parent is View && n++ < 3) p = p.parent as View
+                        p ?: view
+                    }.getOrDefault(view)
+                    val vloc = runCatching { locationTextsFromView(itemRoot) }.getOrDefault(emptyList())
                     val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
                     val picked = if (lastSource == "longpress") null else pickByTag(tag)
                     val aa = picked ?: a
@@ -561,7 +568,10 @@ class HLongPressLayout : BaseHook() {
                                     "VLOC|" + vloc.take(5).joinToString("~") +
                                         "|aid=" + (aa?.aid ?: "null") +
                                         "|rawaid=" + (a?.aid ?: "null") +
-                                        "|poi=" + (aa?.poiDebug() ?: "null") + "|src=" + lastSource +
+                                        "|poi=" + (aa?.poiDebug() ?: "null") +
+                                        "|desc=" + (runCatching {
+                                            aa?.javaClass?.getMethod("getDesc")?.invoke(aa) as? String
+                                        }.getOrNull() ?: "").take(30) + "|src=" + lastSource +
                                         "|panels=" + synchronized(feedPanels) { feedPanels.size } +
                                         "|vis=" + (if (visiblePanel() != null) 1 else 0), "UTF-8"
                                 )
