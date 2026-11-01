@@ -79,6 +79,9 @@ class HLongPressLayout : BaseHook() {
         @JvmStatic
         var lastPanel: Any? = null
 
+        /** 所有 BaseListFragmentPanel 实例（每个播放页一个）。Doula 就是靠这个挑"当前可见"的那页。 */
+        val feedPanels: MutableList<Any> = java.util.Collections.synchronizedList(ArrayList())
+
         /** 预先解析好的 getCurrentAweme() 方法，避免运行时再按名字反射（R8 可能把字符串优化掉） */
         @JvmStatic
         var getCurrentAwemeMethod: java.lang.reflect.Method? = null
@@ -329,11 +332,33 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+    /** 当前可见的 panel —— 按 Doula 的判定：fragment 的 userVisibleHint && isVisible */
+    private fun visiblePanel(): Any? {
+        val list = synchronized(feedPanels) { feedPanels.toList() }
+        for (p in list) {
+            val ok = runCatching {
+                val f = p.javaClass.getMethod("getFragmentP").invoke(p) ?: return@runCatching false
+                val hint = f.javaClass.getMethod("getUserVisibleHint").invoke(f) as? Boolean ?: false
+                val vis = f.javaClass.getMethod("isVisible").invoke(f) as? Boolean ?: false
+                hint && vis
+            }.getOrDefault(false)
+            if (ok) return p
+        }
+        return null
+    }
+
+    private fun awemeFromVisiblePanel(): Aweme? {
+        val p = visiblePanel() ?: return null
+        return runCatching { p.javaClass.getMethod("getCurrentAweme").invoke(p) as? Aweme }.getOrNull()
+    }
+
     private fun awemeForThisLayout(start: View?): Aweme? {
+        // ① 当前可见的 panel（Doula 做法，最可靠）
+        awemeFromVisiblePanel()?.let { lastSource = "visiblepanel"; return it }
         var v: View? = start
         var guard = 0
         while (v != null && guard++ < 8) {
-            // ① View 自身字段 / tag 里直接挂着当前条目
+            // ② View 自身字段 / tag 里直接挂着当前条目
             awemeOf(v)?.let { lastSource = "viewfield"; return it }
             awemeOf(v.tag)?.let { lastSource = "tag"; return it }
             // ② 绑定表里登记过这个视图
@@ -486,14 +511,16 @@ class HLongPressLayout : BaseHook() {
                                     "VLOC|" + vloc.take(5).joinToString("~") +
                                         "|aid=" + (aa?.aid ?: "null") +
                                         "|rawaid=" + (a?.aid ?: "null") +
-                                        "|poi=" + (aa?.poiDebug() ?: "null") + "|src=" + lastSource, "UTF-8"
+                                        "|poi=" + (aa?.poiDebug() ?: "null") + "|src=" + lastSource +
+                                        "|panels=" + synchronized(feedPanels) { feedPanels.size } +
+                                        "|vis=" + (if (visiblePanel() != null) 1 else 0), "UTF-8"
                                 )
                             )
                         }
                     }.start()
                     val msg = "视频属地: ${aa?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa?.createDate()} · v37"
+                        "发布时间: ${aa?.createDate()} · v38"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -736,6 +763,13 @@ class HLongPressLayout : BaseHook() {
             XposedBridge.hookAllConstructors(panelCls, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     lastPanel = param.thisObject
+                    runCatching {
+                        param.thisObject?.let { obj ->
+                            synchronized(feedPanels) {
+                                if (feedPanels.none { it === obj }) feedPanels.add(obj)
+                            }
+                        }
+                    }
                 }
             })
         }.onFailure { XplerLog.e(it) }
