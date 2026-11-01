@@ -365,6 +365,34 @@ class HLongPressLayout : BaseHook() {
         return runCatching { p.javaClass.getMethod("getCurrentAweme").invoke(p) as? Aweme }.getOrNull()
     }
 
+
+    /**
+     * 反着查：遍历所有登记过的 presenter，看哪个 presenter 持有的 View 是当前视图的祖先。
+     * 之前是"从视图往上找 presenter 字段"——方向反了，因为 presenter 持有 view，而不是 view 持有 presenter。
+     */
+    private fun awemeByPresenterForView(start: View?): Aweme? {
+        val chain = ArrayList<View>()
+        var v: View? = start
+        var g = 0
+        while (v != null && g++ < 20) { chain.add(v); v = v.parent as? View }
+        if (chain.isEmpty()) return null
+        val entries = synchronized(boundByPresenter) { boundByPresenter.entries.toList() }
+        for ((p, a) in entries) {
+            var clz: Class<*>? = p.javaClass
+            var d = 0
+            while (clz != null && clz != Any::class.java && d++ < 4) {
+                for (f in clz.declaredFields) {
+                    if (f.type.isPrimitive) continue
+                    val o = runCatching { f.isAccessible = true; f.get(p) }.getOrNull() ?: continue
+                    val vv = o as? View ?: continue
+                    if (chain.any { it === vv }) { lastSource = "presenter"; return a }
+                }
+                clz = clz.superclass
+            }
+        }
+        return null
+    }
+
     private fun awemeForThisLayout(start: View?): Aweme? {
         // ① 当前可见的 panel（Doula 做法，最可靠）
         awemeFromVisiblePanel()?.let { lastSource = "visiblepanel"; return it }
@@ -428,7 +456,7 @@ class HLongPressLayout : BaseHook() {
         val fresh = pendingAweme?.takeIf {
             android.os.SystemClock.elapsedRealtime() - pendingAt < 2000
         }
-        thisAweme = fresh ?: awemeForThisLayout(view)
+        thisAweme = fresh ?: awemeByPresenterForView(view) ?: awemeForThisLayout(view)
         if (fresh != null) lastSource = "longpress" else if (thisAweme == null) lastSource = "none"
 
         val items = getChoiceItems(view).toTypedArray()
@@ -583,7 +611,7 @@ class HLongPressLayout : BaseHook() {
                     }.start()
                     val msg = if (aa == null) "无法确认当前视频（请退出重进后再长按）\n" else "视频属地: ${aa.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa.createDate()} · v46"
+                        "发布时间: ${aa.createDate()} · v47"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
