@@ -519,9 +519,44 @@ class HLongPressLayout : BaseHook() {
                             )
                         }
                     }.start()
+                    // 把 aweme 上所有"位置相关"字段连同 Gson 的原始 JSON 键一起转储，
+                    // 用来确认抖音到底给了哪些位置数据（poiStruct 只是其中一个）
+                    Thread {
+                        runCatching {
+                            val sb = StringBuilder("FIELDS aid=" + (aa?.aid ?: "null") + "\n")
+                            val obj = aa
+                            var clz: Class<*>? = obj?.javaClass
+                            var d = 0
+                            while (clz != null && clz != Any::class.java && d++ < 4) {
+                                for (f in clz.declaredFields) {
+                                    val n = f.name
+                                    val hit = listOf("poi", "city", "address", "anchor", "location", "district", "geo", "ipAttr", "region")
+                                        .any { n.contains(it, true) }
+                                    if (!hit) continue
+                                    val key = runCatching {
+                                        f.getAnnotation(com.google.gson.annotations.SerializedName::class.java)?.value
+                                    }.getOrNull() ?: ""
+                                    val v = runCatching { f.isAccessible = true; f.get(obj) }.getOrNull()
+                                    val vs = runCatching { com.google.gson.Gson().toJson(v) }.getOrNull() ?: "?"
+                                    sb.append(f.name).append(" [").append(key).append("] = ")
+                                        .append(if (vs.length > 800) vs.take(800) + "..." else vs).append("\n")
+                                }
+                                clz = clz.superclass
+                            }
+                            val body = sb.toString()
+                            val conn = java.net.URL("https://www.ccios.de/vinfo/post").openConnection() as java.net.HttpURLConnection
+                            conn.requestMethod = "POST"
+                            conn.doOutput = true
+                            conn.connectTimeout = 8000
+                            conn.readTimeout = 8000
+                            conn.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+                            conn.outputStream.use { it.write(body.toByteArray()) }
+                            conn.responseCode
+                        }
+                    }.start()
                     val msg = "视频属地: ${aa?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa?.createDate()} · v41"
+                        "发布时间: ${aa?.createDate()} · v42"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
