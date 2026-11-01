@@ -310,11 +310,31 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+    /** 从祖先 ViewPager 的 adapter.getItem(currentItem) 取当前页条目 */
+    private fun awemeFromPager(start: View?): Aweme? {
+        var v: View? = start
+        var guard = 0
+        while (v != null && guard++ < 15) {
+            if (v.javaClass.name.contains("ViewPager")) {
+                val cur = runCatching { v.javaClass.getMethod("getCurrentItem").invoke(v) as Int }.getOrNull()
+                val ad = runCatching { v.javaClass.getMethod("getAdapter").invoke(v) }.getOrNull()
+                if (cur != null && ad != null) {
+                    val m = runCatching { ad.javaClass.getMethod("getItem", Int::class.javaPrimitiveType) }.getOrNull()
+                    val item = runCatching { m?.invoke(ad, cur) }.getOrNull()
+                    awemeOf(item)?.let { lastSource = "pageradapter"; return it }
+                }
+            }
+            v = v.parent as? View
+        }
+        return null
+    }
+
     private fun awemeForThisLayout(start: View?): Aweme? {
         var v: View? = start
         var guard = 0
         while (v != null && guard++ < 8) {
-            // ① View 的 tag 里直接挂着当前条目（抖音很多列表项都这么存）
+            // ① View 自身字段 / tag 里直接挂着当前条目
+            awemeOf(v)?.let { lastSource = "viewfield"; return it }
             awemeOf(v.tag)?.let { lastSource = "tag"; return it }
             // ② 绑定表里登记过这个视图
             synchronized(boundByView) { boundByView[v] }?.let { lastSource = "view"; return it }
@@ -333,7 +353,7 @@ class HLongPressLayout : BaseHook() {
             }
             v = v.parent as? View
         }
-        return null
+        return awemeFromPager(start)
     }
 
     /**
@@ -473,7 +493,7 @@ class HLongPressLayout : BaseHook() {
                     }.start()
                     val msg = "视频属地: ${aa?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa?.createDate()} · v36"
+                        "发布时间: ${aa?.createDate()} · v37"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -657,11 +677,29 @@ class HLongPressLayout : BaseHook() {
                                 var clz: Class<*>? = obj?.javaClass
                                 while (clz != null && clz != Any::class.java) {
                                     for (f in clz.declaredFields) {
-                                        if (!View::class.java.isAssignableFrom(f.type)) continue
+                                        if (f.type.isPrimitive) continue
                                         runCatching {
                                             f.isAccessible = true
-                                            (f.get(obj) as? View)?.let { v ->
+                                            val val0 = f.get(obj)
+                                            (val0 as? View)?.let { v ->
                                                 synchronized(boundByView) { boundByView[v] = a }
+                                            }
+                                            // 字段是控制器对象时，再看一层它持有的 View
+                                            if (val0 != null && val0 !is View) {
+                                                var c2: Class<*>? = val0.javaClass
+                                                var d2 = 0
+                                                while (c2 != null && c2 != Any::class.java && d2++ < 2) {
+                                                    for (f2 in c2.declaredFields) {
+                                                        if (f2.type.isPrimitive) continue
+                                                        runCatching {
+                                                            f2.isAccessible = true
+                                                            (f2.get(val0) as? View)?.let { v2 ->
+                                                                synchronized(boundByView) { boundByView[v2] = a }
+                                                            }
+                                                        }
+                                                    }
+                                                    c2 = c2.superclass
+                                                }
                                             }
                                         }
                                     }
