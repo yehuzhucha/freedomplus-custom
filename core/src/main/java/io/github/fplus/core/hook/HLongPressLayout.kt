@@ -497,6 +497,20 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+
+    /** 从按下的 View 往上找，哪个 View 上挂着 aweme tag —— 这就是这条视频本身 */
+    private fun awemeFromViewTag(start: View?): Aweme? {
+        var v: View? = start
+        var guard = 0
+        while (v != null && guard++ < 25) {
+            runCatching {
+                (v.getTag(HVideoViewHolder.AWEME_TAG_KEY) as? Aweme)?.let { return it }
+            }
+            v = v.parent as? View
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
@@ -510,8 +524,12 @@ class HLongPressLayout : BaseHook() {
         val fresh = pendingAweme?.takeIf {
             android.os.SystemClock.elapsedRealtime() - pendingAt < 2000
         }
-        thisAweme = playingAweme
-        if (thisAweme != null) lastSource = "player"
+        thisAweme = awemeFromViewTag(view)
+        if (thisAweme != null) lastSource = "viewtag"
+        if (thisAweme == null) {
+            thisAweme = playingAweme
+            if (thisAweme != null) lastSource = "player"
+        }
         if (thisAweme == null) {
             thisAweme = fresh ?: awemeByPresenterForView(view) ?: awemeForThisLayout(view)
             if (fresh != null) lastSource = "longpress" else if (thisAweme == null) lastSource = "none"
@@ -623,7 +641,7 @@ class HLongPressLayout : BaseHook() {
                     runCatching { synchronized(recentAwemes) { candPool.addAll(recentAwemes) } }
                     val byText = pickByScreenText(screenTexts, candPool.distinctBy { it.aid })
                     val picked = if (byText != null) byText
-                                 else if (lastSource == "longpress" || lastSource == "player") null
+                                 else if (lastSource == "longpress" || lastSource == "player" || lastSource == "viewtag") null
                                  else (pickByTag(tag) ?: pickByText(desc0))
                     val aa = picked ?: a
                     if (picked != null) lastSource = if (byText != null) "screentext" else "tagmatch"
@@ -695,7 +713,7 @@ class HLongPressLayout : BaseHook() {
                         "发布时间: ${aa.createDate()}\n" +
                         (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "账号城市: ${aa.authorCityFast()} · v53"
+                        "账号城市: ${aa.authorCityFast()} · v54"
                     }
                     showMessageDialog(
                         context = view.context,

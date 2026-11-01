@@ -51,6 +51,9 @@ class HVideoViewHolder : BaseHook() {
         @get:Synchronized
         @set:Synchronized
         var aweme: Aweme? = null
+
+        /** 把 aweme 打到这条视频的 itemView 上的 tag key —— 长按时按视图精确取，不依赖任何顺序 */
+        const val AWEME_TAG_KEY = 0x0F10F10F
     }
 
     private val config get() = ConfigV1.get()
@@ -300,7 +303,23 @@ class HVideoViewHolder : BaseHook() {
     @OnAfter("getAweme")
     fun getAwemeAfter(params: MethodParam) {
         hookBlockRunning(params) {
-            HVideoViewHolder.aweme = result?.asOrNull()
+            val a: Aweme? = result?.asOrNull()
+            HVideoViewHolder.aweme = a
+            // ★ 关键：把 aweme 记到这条视频自己的 itemView 上。
+            //   长按时从按下的 View 往上找，找到哪个 View 上挂着它，就是哪条视频，不存在错位。
+            if (a != null) {
+                runCatching {
+                    val vh = thisObject
+                    val itemView = (runCatching {
+                        vh?.javaClass?.getMethod("getItemView")?.invoke(vh) as? View
+                    }.getOrNull()) ?: (runCatching {
+                        val f = vh?.javaClass?.getDeclaredField("itemView")
+                        f?.isAccessible = true
+                        f?.get(vh) as? View
+                    }.getOrNull())
+                    itemView?.setTag(HVideoViewHolder.AWEME_TAG_KEY, a)
+                }
+            }
         }.onFailure {
             XplerLog.e(it)
         }
