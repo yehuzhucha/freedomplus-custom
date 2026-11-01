@@ -81,6 +81,10 @@ class HLongPressLayout : BaseHook() {
         @Volatile
         var pendingAt: Long = 0L
 
+        /** 播放器实际开始播放的那条 aweme —— 预加载不会触发播放，所以这个最接近"屏幕上的那条" */
+        @Volatile
+        var playingAweme: Aweme? = null
+
         /** 本次长按实际命中的取值来源：tag / view / presenter / global */
         @Volatile
         var lastSource: String = "none"
@@ -477,8 +481,12 @@ class HLongPressLayout : BaseHook() {
         val fresh = pendingAweme?.takeIf {
             android.os.SystemClock.elapsedRealtime() - pendingAt < 2000
         }
-        thisAweme = fresh ?: awemeByPresenterForView(view) ?: awemeForThisLayout(view)
-        if (fresh != null) lastSource = "longpress" else if (thisAweme == null) lastSource = "none"
+        thisAweme = playingAweme
+        if (thisAweme != null) lastSource = "player"
+        if (thisAweme == null) {
+            thisAweme = fresh ?: awemeByPresenterForView(view) ?: awemeForThisLayout(view)
+            if (fresh != null) lastSource = "longpress" else if (thisAweme == null) lastSource = "none"
+        }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -579,7 +587,7 @@ class HLongPressLayout : BaseHook() {
                     val desc0 = runCatching {
                         a?.javaClass?.getMethod("getDesc")?.invoke(a) as? String
                     }.getOrNull()
-                    val picked = if (lastSource == "longpress") null
+                    val picked = if (lastSource == "longpress" || lastSource == "player") null
                                  else (pickByTag(tag) ?: pickByText(desc0))
                     val aa = picked ?: a
                     if (picked != null) lastSource = "tagmatch"
@@ -651,7 +659,7 @@ class HLongPressLayout : BaseHook() {
                         "发布时间: ${aa.createDate()}\n" +
                         (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "账号城市: ${aa.authorCityFast()} · v51"
+                        "账号城市: ${aa.authorCityFast()} · v52"
                     }
                     showMessageDialog(
                         context = view.context,
@@ -827,6 +835,19 @@ class HLongPressLayout : BaseHook() {
                     }
             }.onFailure { XplerLog.e(it) }
         }
+
+        // ★ 挂播放器：视频真正开始播放时才会走到这里，预加载不会。这是"屏幕上那条"最可靠的锚点。
+        runCatching {
+            val svc = lparam.classLoader.loadClass("com.ss.android.ugc.aweme.feed.panel.FeedPanelPlayerService")
+            XposedBridge.hookAllMethods(svc, null, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    runCatching {
+                        val a = param.args?.filterIsInstance<Aweme>()?.firstOrNull() ?: return
+                        playingAweme = a
+                    }
+                }
+            })
+        }.onFailure { XplerLog.e(it) }
 
         // 36.8.0：视频信息/下载都依赖 aweme，而它挂在 FeedLongPressLayoutPresenter 的字段上。
         // 该类名未混淆，直接 hook onBindSafe 抓当前 aweme（每次绑定新视频都会刷新）。
