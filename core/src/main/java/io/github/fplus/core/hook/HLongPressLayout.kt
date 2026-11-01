@@ -533,11 +533,20 @@ class HLongPressLayout : BaseHook() {
                                     val hit = listOf("poi", "city", "address", "anchor", "location", "district", "geo", "ipAttr", "region")
                                         .any { n.contains(it, true) }
                                     if (!hit) continue
+                                    // 模块编译期没有 Gson 依赖，全部走反射
                                     val key = runCatching {
-                                        f.getAnnotation(com.google.gson.annotations.SerializedName::class.java)?.value
+                                        f.annotations.firstOrNull {
+                                            it.annotationClass.java.name == "com.google.gson.annotations.SerializedName"
+                                        }?.let { ann ->
+                                            ann.annotationClass.java.getMethod("value").invoke(ann) as? String
+                                        }
                                     }.getOrNull() ?: ""
                                     val v = runCatching { f.isAccessible = true; f.get(obj) }.getOrNull()
-                                    val vs = runCatching { com.google.gson.Gson().toJson(v) }.getOrNull() ?: "?"
+                                    val vs = runCatching {
+                                        val gc = Class.forName("com.google.gson.Gson")
+                                        val g = gc.getDeclaredConstructor().newInstance()
+                                        gc.getMethod("toJson", Any::class.java).invoke(g, v) as? String
+                                    }.getOrNull() ?: "?"
                                     sb.append(f.name).append(" [").append(key).append("] = ")
                                         .append(if (vs.length > 800) vs.take(800) + "..." else vs).append("\n")
                                 }
