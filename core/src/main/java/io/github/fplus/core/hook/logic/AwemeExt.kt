@@ -402,3 +402,17 @@ suspend fun Aweme.authorCityFast(): String = withContext(Dispatchers.IO) {
 
 /** 快速取 IP 属地 */
 fun Aweme.ipFast(): String = (reflect(this, "ipAttribution") as? String)?.trim().orEmpty().ifEmpty { "未知" }
+
+/**
+ * 快速取"发布地"：优先读抖音自带的 poiStruct.address_info（本地字段，零网络）。
+ * 没有 POI 说明作者没标注位置，返回空串。
+ */
+fun Aweme.publishPlaceFast(): String = runCatching {
+    val poi = reflect(this, "poiStruct")
+        ?: reflect(this, "poiAnchorStructV2")
+        ?: reflect(this, "poiAnchorStruct")
+    val own = poiAddressInfo(poi)
+    if (own.isNotEmpty()) return@runCatching own
+    val name = (reflect(poi, "poiName") as? String)?.trim().orEmpty()
+    name
+}.getOrElse { "" }

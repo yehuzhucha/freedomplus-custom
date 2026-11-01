@@ -29,6 +29,7 @@ import io.github.fplus.core.hook.logic.preciseLocation
 import io.github.fplus.core.hook.logic.poiDebug
 import io.github.fplus.core.hook.logic.authorCityFast
 import io.github.fplus.core.hook.logic.ipFast
+import io.github.fplus.core.hook.logic.publishPlaceFast
 import io.github.fplus.core.hook.logic.createDate
 import io.github.xpler.core.XplerLog
 import io.github.xpler.core.hookBlockRunning
@@ -614,9 +615,11 @@ class HLongPressLayout : BaseHook() {
                     val msg = if (aa == null) {
                         "无法确认当前视频（请退出重进后再长按）\n"
                     } else {
+                        val place = aa.publishPlaceFast()
                         "发布时间: ${aa.createDate()}\n" +
+                        (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "作者城市: ${aa.authorCityFast()} · v48"
+                        "账号城市: ${aa.authorCityFast()} · v49"
                     }
                     showMessageDialog(
                         context = view.context,
