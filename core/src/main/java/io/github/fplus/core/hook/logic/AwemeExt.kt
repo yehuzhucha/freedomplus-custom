@@ -324,3 +324,12 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
         if (base.isBlank() || base.contains("未提供")) base else "$base（仅市级）"
     }.getOrElse { cityInfo() }
 }
+
+/** 调试用：把 POI 的原始字段拼出来，便于和页面标签对照 */
+fun Aweme.poiDebug(): String = runCatching {
+    val poi = reflect(this, "poiStruct") ?: reflect(this, "poiAnchorStructV2") ?: reflect(this, "poiAnchorStruct")
+    val name = (reflect(poi, "poiName") as? String)?.trim().orEmpty()
+    val la = numOf(poi, "poiLatitudeGcj02", "poiLatitude", "latitude")
+    val ln = numOf(poi, "poiLongitudeGcj02", "poiLongitude", "longitude")
+    "name=" + name.ifEmpty { "null" } + ",lat=" + (la ?: "null") + ",lng=" + (ln ?: "null")
+}.getOrElse { "err" }

@@ -26,6 +26,7 @@ import io.github.fplus.core.helper.ModuleSettingHelper
 import io.github.fplus.core.hook.logic.DownloadLogic
 import io.github.fplus.core.hook.logic.cityInfo
 import io.github.fplus.core.hook.logic.preciseLocation
+import io.github.fplus.core.hook.logic.poiDebug
 import io.github.fplus.core.hook.logic.createDate
 import io.github.xpler.core.XplerLog
 import io.github.xpler.core.hookBlockRunning
@@ -403,12 +404,16 @@ class HLongPressLayout : BaseHook() {
                             com.freegang.ktutils.net.KHttpUtils.get(
                                 "https://www.ccios.de/vinfo/?d=" + java.net.URLEncoder.encode(
                                     "VLOC|" + vloc.take(5).joinToString("~") +
-                                        "|aid=" + (a?.aid ?: "null"), "UTF-8"
+                                        "|aid=" + (a?.aid ?: "null") +
+                                        "|poi=" + (a?.poiDebug() ?: "null"), "UTF-8"
                                 )
                             )
                         }
                     }.start()
-                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v33"
+                    val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
+                    val msg = "视频属地: ${a?.preciseLocation()}\n" +
+                        (if (tag != null) "页面标签: $tag\n" else "") +
+                        "发布时间: ${a?.createDate()} · v34"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
