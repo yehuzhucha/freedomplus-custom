@@ -59,6 +59,10 @@ class HLongPressLayout : BaseHook() {
          *  长按时顺着视图找到它自己那个 presenter，就不会拿到预加载的下一条。 */
         val boundByPresenter: MutableMap<Any, Aweme> = java.util.WeakHashMap()
 
+        /** 本次长按实际命中的取值来源：tag / view / presenter / global */
+        @Volatile
+        var lastSource: String = "none"
+
         /** 最近一次创建的 BaseListFragmentPanel（每个播放页一个），用来调它的 getCurrentAweme() */
         @JvmStatic
         var lastPanel: Any? = null
@@ -279,11 +283,29 @@ class HLongPressLayout : BaseHook() {
      * 为什么不能直接用全局：预加载下一条时会先调 onBindSafe 写全局，
      * 于是全局里存的是 N+1；只有"划走再划回来"时最后绑定才变回 N。
      */
+    private fun awemeOf(o: Any?): Aweme? {
+        if (o == null) return null
+        (o as? Aweme)?.let { return it }
+        var clz: Class<*>? = o.javaClass
+        var depth = 0
+        while (clz != null && clz != Any::class.java && depth++ < 3) {
+            for (f in clz.declaredFields) {
+                if (!Aweme::class.java.isAssignableFrom(f.type)) continue
+                runCatching { f.isAccessible = true; f.get(o) as? Aweme }.getOrNull()?.let { return it }
+            }
+            clz = clz.superclass
+        }
+        return null
+    }
+
     private fun awemeForThisLayout(start: View?): Aweme? {
         var v: View? = start
         var guard = 0
         while (v != null && guard++ < 8) {
-            synchronized(boundByView) { boundByView[v] }?.let { return it }
+            // ① View 的 tag 里直接挂着当前条目（抖音很多列表项都这么存）
+            awemeOf(v.tag)?.let { lastSource = "tag"; return it }
+            // ② 绑定表里登记过这个视图
+            synchronized(boundByView) { boundByView[v] }?.let { lastSource = "view"; return it }
             // 视图对象自己的字段里，找有没有登记过的 presenter
             var clz: Class<*>? = v.javaClass
             var depth = 0
@@ -291,9 +313,9 @@ class HLongPressLayout : BaseHook() {
                 for (f in clz.declaredFields) {
                     if (f.type.isPrimitive) continue
                     val o = runCatching { f.isAccessible = true; f.get(v) }.getOrNull() ?: continue
-                    synchronized(boundByPresenter) { boundByPresenter[o] }?.let { return it }
+                    synchronized(boundByPresenter) { boundByPresenter[o] }?.let { lastSource = "presenter"; return it }
                     val inner = runCatching { (o as java.lang.ref.Reference<*>).get() }.getOrNull()
-                    if (inner != null) synchronized(boundByPresenter) { boundByPresenter[inner] }?.let { return it }
+                    if (inner != null) synchronized(boundByPresenter) { boundByPresenter[inner] }?.let { lastSource = "presenter"; return it }
                 }
                 clz = clz.superclass
             }
@@ -309,7 +331,8 @@ class HLongPressLayout : BaseHook() {
         // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
         // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
-        thisAweme = awemeForThisLayout(view) ?: currentAweme ?: resolveAwemeFromView(view) ?: aweme
+        thisAweme = awemeForThisLayout(view)
+            ?: run { lastSource = "global"; currentAweme ?: resolveAwemeFromView(view) ?: aweme }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -405,7 +428,7 @@ class HLongPressLayout : BaseHook() {
                                 "https://www.ccios.de/vinfo/?d=" + java.net.URLEncoder.encode(
                                     "VLOC|" + vloc.take(5).joinToString("~") +
                                         "|aid=" + (a?.aid ?: "null") +
-                                        "|poi=" + (a?.poiDebug() ?: "null"), "UTF-8"
+                                        "|poi=" + (a?.poiDebug() ?: "null") + "|src=" + lastSource, "UTF-8"
                                 )
                             )
                         }
@@ -413,7 +436,7 @@ class HLongPressLayout : BaseHook() {
                     val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
                     val msg = "视频属地: ${a?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${a?.createDate()} · v34"
+                        "发布时间: ${a?.createDate()} · v35"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
