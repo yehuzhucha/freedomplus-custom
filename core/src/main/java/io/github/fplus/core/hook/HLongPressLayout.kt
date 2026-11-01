@@ -629,7 +629,7 @@ class HLongPressLayout : BaseHook() {
                         "发布时间: ${aa.createDate()}\n" +
                         (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "账号城市: ${aa.authorCityFast()} · v49"
+                        "账号城市: ${aa.authorCityFast()} · v50"
                     }
                     showMessageDialog(
                         context = view.context,
