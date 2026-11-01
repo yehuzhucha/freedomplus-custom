@@ -269,8 +269,8 @@ class HLongPressLayout : BaseHook() {
     }
 
     /** 从当前长按布局往上找，看哪个视图在 boundByView 里登记过 */
-    private fun awemeForThisLayout(): Aweme? {
-        var v: View? = this
+    private fun awemeForThisLayout(start: View?): Aweme? {
+        var v: View? = start
         var guard = 0
         while (v != null && guard++ < 20) {
             synchronized(boundByView) { boundByView[v] }?.let { return it }
@@ -286,7 +286,7 @@ class HLongPressLayout : BaseHook() {
         // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
         // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
-        thisAweme = awemeForThisLayout() ?: currentAweme ?: resolveAwemeFromView(view) ?: aweme
+        thisAweme = awemeForThisLayout(view) ?: currentAweme ?: resolveAwemeFromView(view) ?: aweme
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
