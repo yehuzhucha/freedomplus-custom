@@ -319,11 +319,17 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
             }
         }
 
-        // 没有 POI / 坐标 / geohash：抖音本身就没给拍摄地，只能用作者城市，
-        // 必须标清楚，否则会被当成拍摄地（用户已多次指出这个问题）
+        // 没有 POI / 坐标 / geohash：抖音本身没给拍摄地。
+        // 退而求其次用「作者 IP 属地」（省级，比城市码可靠），并明确标注不是拍摄地。
+        val ip = (reflect(this@preciseLocation, "ipAttribution") as? String)?.trim().orEmpty()
         val base = cityInfo()
-        if (base.isBlank() || base.contains("未提供")) "该视频未标注位置（抖音无坐标数据）"
-        else "未标注拍摄地｜作者城市: $base"
+        val hasCity = base.isNotBlank() && !base.contains("未提供")
+        when {
+            ip.isNotEmpty() && hasCity -> "未标注拍摄地｜IP属地: $ip｜作者城市: $base"
+            ip.isNotEmpty() -> "未标注拍摄地｜IP属地: $ip"
+            hasCity -> "未标注拍摄地｜作者城市: $base"
+            else -> "该视频未标注位置（抖音无坐标数据）"
+        }
     }.getOrElse { cityInfo() }
 }
 
