@@ -503,10 +503,11 @@ class HLongPressLayout : BaseHook() {
         var v: View? = start
         var guard = 0
         while (v != null && guard++ < 25) {
+            val vv: View = v
             runCatching {
-                (v.getTag(HVideoViewHolder.AWEME_TAG_KEY) as? Aweme)?.let { return it }
+                (vv.getTag(HVideoViewHolder.AWEME_TAG_KEY) as? Aweme)?.let { return it }
             }
-            v = v.parent as? View
+            v = vv.parent as? View
         }
         return null
     }
