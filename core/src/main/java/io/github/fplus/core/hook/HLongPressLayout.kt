@@ -325,7 +325,12 @@ class HLongPressLayout : BaseHook() {
                 if (cur != null && ad != null) {
                     val m = runCatching { ad.javaClass.getMethod("getItem", Int::class.javaPrimitiveType) }.getOrNull()
                     val item = runCatching { m?.invoke(ad, cur) }.getOrNull()
-                    awemeOf(item)?.let { lastSource = "pageradapter"; return it }
+                    awemeOf(item)?.let {
+                        lastSource = "pageradapter@" + cur + "/" + runCatching {
+                            ad.javaClass.getMethod("getCount").invoke(ad) as Int
+                        }.getOrDefault(-1)
+                        return it
+                    }
                 }
             }
             v = v.parent as? View
@@ -411,7 +416,7 @@ class HLongPressLayout : BaseHook() {
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
         // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
         thisAweme = awemeForThisLayout(view)
-            ?: run { lastSource = "global"; currentAweme ?: resolveAwemeFromView(view) ?: aweme }
+        if (thisAweme == null) lastSource = "none"
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -563,9 +568,9 @@ class HLongPressLayout : BaseHook() {
                             conn.responseCode
                         }
                     }.start()
-                    val msg = "视频属地: ${aa?.preciseLocation()}\n" +
+                    val msg = if (aa == null) "无法确认当前视频（请退出重进后再长按）\n" else "视频属地: ${aa.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa?.createDate()} · v43"
+                        "发布时间: ${aa.createDate()} · v44"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
