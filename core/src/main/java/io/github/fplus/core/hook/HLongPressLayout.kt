@@ -54,6 +54,10 @@ class HLongPressLayout : BaseHook() {
          *  按视图存，长按哪个布局就取哪个，物理上不会错位。 */
         val boundByView: MutableMap<View, Aweme> = java.util.WeakHashMap()
 
+        /** presenter 实例 → 它当前绑定的 aweme。presenter 是每个播放页一个，
+         *  长按时顺着视图找到它自己那个 presenter，就不会拿到预加载的下一条。 */
+        val boundByPresenter: MutableMap<Any, Aweme> = java.util.WeakHashMap()
+
         /** 最近一次创建的 BaseListFragmentPanel（每个播放页一个），用来调它的 getCurrentAweme() */
         @JvmStatic
         var lastPanel: Any? = null
@@ -268,12 +272,30 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
-    /** 从当前长按布局往上找，看哪个视图在 boundByView 里登记过 */
+    /**
+     * 从长按的那个 View 往上走，找它所属播放页的 presenter，再取该 presenter 绑定的 aweme。
+     *
+     * 为什么不能直接用全局：预加载下一条时会先调 onBindSafe 写全局，
+     * 于是全局里存的是 N+1；只有"划走再划回来"时最后绑定才变回 N。
+     */
     private fun awemeForThisLayout(start: View?): Aweme? {
         var v: View? = start
         var guard = 0
-        while (v != null && guard++ < 20) {
+        while (v != null && guard++ < 8) {
             synchronized(boundByView) { boundByView[v] }?.let { return it }
+            // 视图对象自己的字段里，找有没有登记过的 presenter
+            var clz: Class<*>? = v.javaClass
+            var depth = 0
+            while (clz != null && clz != Any::class.java && depth++ < 3) {
+                for (f in clz.declaredFields) {
+                    if (f.type.isPrimitive) continue
+                    val o = runCatching { f.isAccessible = true; f.get(v) }.getOrNull() ?: continue
+                    synchronized(boundByPresenter) { boundByPresenter[o] }?.let { return it }
+                    val inner = runCatching { (o as java.lang.ref.Reference<*>).get() }.getOrNull()
+                    if (inner != null) synchronized(boundByPresenter) { boundByPresenter[inner] }?.let { return it }
+                }
+                clz = clz.superclass
+            }
             v = v.parent as? View
         }
         return null
@@ -386,7 +408,7 @@ class HLongPressLayout : BaseHook() {
                             )
                         }
                     }.start()
-                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v32"
+                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v33"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -563,6 +585,7 @@ class HLongPressLayout : BaseHook() {
                     runCatching {
                         val a: Aweme? = thisObject?.findFieldGetValue { type(Aweme::class.java) }
                         if (a != null) {
+                            runCatching { thisObject?.let { synchronized(boundByPresenter) { boundByPresenter[it] = a } } }
                             // 登记 presenter 上所有 View 字段 → aweme（每个播放页一个布局实例）
                             runCatching {
                                 val obj = thisObject
