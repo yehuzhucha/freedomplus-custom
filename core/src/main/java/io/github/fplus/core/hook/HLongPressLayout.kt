@@ -318,9 +318,10 @@ class HLongPressLayout : BaseHook() {
         var v: View? = start
         var guard = 0
         while (v != null && guard++ < 15) {
-            if (v.javaClass.name.contains("ViewPager")) {
-                val cur = runCatching { v.javaClass.getMethod("getCurrentItem").invoke(v) as Int }.getOrNull()
-                val ad = runCatching { v.javaClass.getMethod("getAdapter").invoke(v) }.getOrNull()
+            val vv: View = v
+            if (vv.javaClass.name.contains("ViewPager")) {
+                val cur = runCatching { vv.javaClass.getMethod("getCurrentItem").invoke(vv) as Int }.getOrNull()
+                val ad = runCatching { vv.javaClass.getMethod("getAdapter").invoke(vv) }.getOrNull()
                 if (cur != null && ad != null) {
                     val m = runCatching { ad.javaClass.getMethod("getItem", Int::class.javaPrimitiveType) }.getOrNull()
                     val item = runCatching { m?.invoke(ad, cur) }.getOrNull()
