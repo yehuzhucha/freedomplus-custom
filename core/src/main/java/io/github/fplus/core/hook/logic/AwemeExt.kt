@@ -381,3 +381,24 @@ private fun poiAddressInfo(poi: Any?): String = runCatching {
         .filter { it.isNotEmpty() }
         .joinToString("")
 }.getOrElse { "" }
+
+/** 城市码 → 名称 的本地缓存，避免每次长按都请求（之前慢就是慢在每次都发网络请求） */
+private val cityNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+/** 快速取"作者省市"：只用城市码查表，不碰地图接口 */
+suspend fun Aweme.authorCityFast(): String = withContext(Dispatchers.IO) {
+    val code = this.city?.trim().orEmpty()
+    if (code.isEmpty()) return@withContext "未知"
+    cityNameCache[code]?.let { return@withContext it }
+    val r = runCatching {
+        val js = KHttpUtils.get("https://www.ccios.de/area/?code=$code").parseJSON()
+        val p = js.getStringOrDefault("province")
+        val c = js.getStringOrDefault("city")
+        "$p $c".trim()
+    }.getOrElse { "" }
+    if (r.isNotBlank() && !r.contains("未知")) cityNameCache[code] = r
+    r.ifBlank { "未知" }
+}
+
+/** 快速取 IP 属地 */
+fun Aweme.ipFast(): String = (reflect(this, "ipAttribution") as? String)?.trim().orEmpty().ifEmpty { "未知" }
