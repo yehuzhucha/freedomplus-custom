@@ -446,6 +446,23 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+
+    /**
+     * 用视频文案/话题里出现的地名，去最近绑定的几条 aweme 里认领正确的那条。
+     * 例：文案里有 "#郑州地铁" → 城市名含"郑州"的那条才是当前视频。
+     */
+    private suspend fun pickByText(desc: String?): Aweme? {
+        if (desc.isNullOrBlank()) return null
+        val cands = synchronized(recentAwemes) { recentAwemes.toList() }.reversed()
+        for (c in cands) {
+            val city = runCatching { c.authorCityFast() }.getOrDefault("")
+            val short = city.split(" ").lastOrNull()?.trim()
+                ?.removeSuffix("市")?.removeSuffix("地区")?.removeSuffix("自治州")?.orEmpty()
+            if (short.length >= 2 && desc.contains(short)) return c
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
@@ -558,7 +575,11 @@ class HLongPressLayout : BaseHook() {
                     }.getOrDefault(view)
                     val vloc = runCatching { locationTextsFromView(itemRoot) }.getOrDefault(emptyList())
                     val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
-                    val picked = if (lastSource == "longpress") null else pickByTag(tag)
+                    val desc0 = runCatching {
+                        a?.javaClass?.getMethod("getDesc")?.invoke(a) as? String
+                    }.getOrNull()
+                    val picked = if (lastSource == "longpress") null
+                                 else (pickByTag(tag) ?: pickByText(desc0))
                     val aa = picked ?: a
                     if (picked != null) lastSource = "tagmatch"
                     Thread {
@@ -629,7 +650,7 @@ class HLongPressLayout : BaseHook() {
                         "发布时间: ${aa.createDate()}\n" +
                         (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "账号城市: ${aa.authorCityFast()} · v50"
+                        "账号城市: ${aa.authorCityFast()} · v51"
                     }
                     showMessageDialog(
                         context = view.context,
