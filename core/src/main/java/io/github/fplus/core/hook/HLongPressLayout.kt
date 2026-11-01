@@ -468,6 +468,35 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+
+    /** 收集当前条目子树里的所有文本（含视频文案），用于和候选 aweme 的 desc 比对 */
+    private fun textsFromView(root: View): List<String> {
+        val out = ArrayList<String>()
+        fun walk(v: View) {
+            if (v is TextView && v.isVisible) {
+                val t = v.text?.toString()?.trim().orEmpty()
+                if (t.length in 4..200) out.add(t)
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) runCatching { walk(v.getChildAt(i)) }
+        }
+        runCatching { walk(root) }
+        return out
+    }
+
+    /** 用屏幕上的文案认领候选：候选的 desc 前 12 字出现在屏幕上，就是这条 */
+    private fun pickByScreenText(screenTexts: List<String>, cands: List<Aweme>): Aweme? {
+        if (screenTexts.isEmpty() || cands.isEmpty()) return null
+        for (c in cands) {
+            val d = runCatching {
+                c.javaClass.getMethod("getDesc")?.invoke(c) as? String
+            }.getOrNull()?.trim().orEmpty()
+            if (d.length < 6) continue
+            val key = d.take(12)
+            if (screenTexts.any { it.contains(key) }) return c
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
@@ -587,10 +616,17 @@ class HLongPressLayout : BaseHook() {
                     val desc0 = runCatching {
                         a?.javaClass?.getMethod("getDesc")?.invoke(a) as? String
                     }.getOrNull()
-                    val picked = if (lastSource == "longpress" || lastSource == "player") null
+                    val screenTexts = runCatching { textsFromView(itemRoot) }.getOrDefault(emptyList())
+                    val candPool = ArrayList<Aweme>()
+                    runCatching { a?.let { candPool.add(it) } }
+                    runCatching { HVideoViewHolder.aweme?.let { candPool.add(it) } }
+                    runCatching { synchronized(recentAwemes) { candPool.addAll(recentAwemes) } }
+                    val byText = pickByScreenText(screenTexts, candPool.distinctBy { it.aid })
+                    val picked = if (byText != null) byText
+                                 else if (lastSource == "longpress" || lastSource == "player") null
                                  else (pickByTag(tag) ?: pickByText(desc0))
                     val aa = picked ?: a
-                    if (picked != null) lastSource = "tagmatch"
+                    if (picked != null) lastSource = if (byText != null) "screentext" else "tagmatch"
                     Thread {
                         runCatching {
                             com.freegang.ktutils.net.KHttpUtils.get(
@@ -659,7 +695,7 @@ class HLongPressLayout : BaseHook() {
                         "发布时间: ${aa.createDate()}\n" +
                         (if (place.isNotEmpty()) "发布地: $place\n" else "发布地: 未标注\n") +
                         "IP属地: ${aa.ipFast()}\n" +
-                        "账号城市: ${aa.authorCityFast()} · v52"
+                        "账号城市: ${aa.authorCityFast()} · v53"
                     }
                     showMessageDialog(
                         context = view.context,
