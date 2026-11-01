@@ -565,7 +565,7 @@ class HLongPressLayout : BaseHook() {
                     }.start()
                     val msg = "视频属地: ${aa?.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa?.createDate()} · v42"
+                        "发布时间: ${aa?.createDate()} · v43"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",

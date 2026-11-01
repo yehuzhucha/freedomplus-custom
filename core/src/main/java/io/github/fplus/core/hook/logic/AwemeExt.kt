@@ -294,6 +294,12 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
         val lat = latG ?: 0.0
         val lng = lngG ?: 0.0
 
+        // ① 抖音自己给的地址（最准，且不依赖网络）
+        val own = poiAddressInfo(poi)
+        if (own.isNotEmpty()) {
+            return@withContext if (poiName.isNotEmpty() && !own.contains(poiName)) "$poiName｜$own" else own
+        }
+
         if (lat != 0.0 && lng != 0.0) {
             val (wlat, wlng) = gcj02ToWgs84(lat, lng)
             val addr = fmtGeo(geoLookupFull(wlat, wlng))
@@ -364,3 +370,14 @@ private fun fmtGeo(m: Map<String, String>): String {
         .mapNotNull { k -> m[k]?.takeIf { it.isNotBlank() } }
         .joinToString(" ")
 }
+
+/** 抖音自带的完整地址：poiStruct.address_info（simple_addr 直接是"邢台市信都区皇寺镇"） */
+private fun poiAddressInfo(poi: Any?): String = runCatching {
+    val ai = reflect(poi, "addressInfo") ?: return@runCatching ""
+    val simple = (reflect(ai, "simpleAddr") as? String)?.trim().orEmpty()
+    if (simple.isNotEmpty()) return@runCatching simple
+    listOf("province", "city", "district", "address")
+        .map { (reflect(ai, it) as? String)?.trim().orEmpty() }
+        .filter { it.isNotEmpty() }
+        .joinToString("")
+}.getOrElse { "" }
