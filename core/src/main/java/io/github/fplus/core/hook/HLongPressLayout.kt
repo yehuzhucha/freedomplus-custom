@@ -452,13 +452,14 @@ class HLongPressLayout : BaseHook() {
      * 例：文案里有 "#郑州地铁" → 城市名含"郑州"的那条才是当前视频。
      */
     private suspend fun pickByText(desc: String?): Aweme? {
-        if (desc.isNullOrBlank()) return null
+        val d: String = desc ?: return null
+        if (d.isBlank()) return null
         val cands = synchronized(recentAwemes) { recentAwemes.toList() }.reversed()
         for (c in cands) {
             val city = runCatching { c.authorCityFast() }.getOrDefault("")
             val short = city.split(" ").lastOrNull()?.trim()
-                ?.removeSuffix("市")?.removeSuffix("地区")?.removeSuffix("自治州")?.orEmpty()
-            if (short.length >= 2 && desc.contains(short)) return c
+                ?.removeSuffix("市")?.removeSuffix("地区")?.removeSuffix("自治州").orEmpty()
+            if (short.length >= 2 && d.contains(short)) return c
         }
         return null
     }
