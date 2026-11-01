@@ -71,6 +71,13 @@ class HLongPressLayout : BaseHook() {
             }
         }
 
+        /** 长按那一刻抓到的 aweme（带时间戳，避免上一次的残留被复用） */
+        @Volatile
+        var pendingAweme: Aweme? = null
+
+        @Volatile
+        var pendingAt: Long = 0L
+
         /** 本次长按实际命中的取值来源：tag / view / presenter / global */
         @Volatile
         var lastSource: String = "none"
@@ -415,10 +422,14 @@ class HLongPressLayout : BaseHook() {
         // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
         // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
-        if (thisAweme == null) {
-            thisAweme = awemeForThisLayout(view)
-            if (thisAweme == null) lastSource = "none"
+        // 每次长按都重新取，绝不复用上一次的结果
+        thisAweme = null
+        lastSource = "none"
+        val fresh = pendingAweme?.takeIf {
+            android.os.SystemClock.elapsedRealtime() - pendingAt < 2000
         }
+        thisAweme = fresh ?: awemeForThisLayout(view)
+        if (fresh != null) lastSource = "longpress" else if (thisAweme == null) lastSource = "none"
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -572,7 +583,7 @@ class HLongPressLayout : BaseHook() {
                     }.start()
                     val msg = if (aa == null) "无法确认当前视频（请退出重进后再长按）\n" else "视频属地: ${aa.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa.createDate()} · v45"
+                        "发布时间: ${aa.createDate()} · v46"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -721,11 +732,9 @@ class HLongPressLayout : BaseHook() {
                             runCatching {
                                 val a = thisObject?.findFieldGetValue { type(Aweme::class.java) }
                                     ?: HVideoViewHolder.aweme
-                                if (a != null) {
-                                    aweme = a
-                                    thisAweme = a
-                                    lastSource = "longpress"
-                                }
+                                pendingAweme = a
+                                pendingAt = android.os.SystemClock.elapsedRealtime()
+                                if (a != null) aweme = a
                             }
 
                             // 长按上半部分唤起模块设置，同时拦截抖音原生长按弹窗
