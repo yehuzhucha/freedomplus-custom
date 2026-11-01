@@ -415,8 +415,10 @@ class HLongPressLayout : BaseHook() {
         // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
         // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
-        thisAweme = awemeForThisLayout(view)
-        if (thisAweme == null) lastSource = "none"
+        if (thisAweme == null) {
+            thisAweme = awemeForThisLayout(view)
+            if (thisAweme == null) lastSource = "none"
+        }
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -507,7 +509,7 @@ class HLongPressLayout : BaseHook() {
                     }
                     val vloc = runCatching { locationTextsFromView(view.rootView) }.getOrDefault(emptyList())
                     val tag = vloc.firstOrNull { it.contains("市") || it.contains("区") || it.contains("县") } ?: vloc.firstOrNull()
-                    val picked = pickByTag(tag)
+                    val picked = if (lastSource == "longpress") null else pickByTag(tag)
                     val aa = picked ?: a
                     if (picked != null) lastSource = "tagmatch"
                     Thread {
@@ -570,7 +572,7 @@ class HLongPressLayout : BaseHook() {
                     }.start()
                     val msg = if (aa == null) "无法确认当前视频（请退出重进后再长按）\n" else "视频属地: ${aa.preciseLocation()}\n" +
                         (if (tag != null) "页面标签: $tag\n" else "") +
-                        "发布时间: ${aa.createDate()} · v44"
+                        "发布时间: ${aa.createDate()} · v45"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -713,6 +715,18 @@ class HLongPressLayout : BaseHook() {
                         onBefore {
                             val y = args[1] as Float
                             val half = screenSize.height / 2
+
+                            // ★ 最关键的一步：长按回调的 thisObject 就是"这条视频"的控制器，
+                            //   它身上挂着这条视频的 aweme。原版模块就是靠这里取的，最准。
+                            runCatching {
+                                val a = thisObject?.findFieldGetValue { type(Aweme::class.java) }
+                                    ?: HVideoViewHolder.aweme
+                                if (a != null) {
+                                    aweme = a
+                                    thisAweme = a
+                                    lastSource = "longpress"
+                                }
+                            }
 
                             // 长按上半部分唤起模块设置，同时拦截抖音原生长按弹窗
                             // 36.8.0：onLongPressIntercept 返回 boolean，必须 setResult(true)
