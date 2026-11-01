@@ -50,6 +50,10 @@ class HLongPressLayout : BaseHook() {
         @Volatile
         var currentAweme: Aweme? = null
 
+        /** 视图 → 该视图绑定的 aweme。预加载下一条时会先绑定，写全局变量就会被覆盖；
+         *  按视图存，长按哪个布局就取哪个，物理上不会错位。 */
+        val boundByView: MutableMap<View, Aweme> = java.util.WeakHashMap()
+
         /** 最近一次创建的 BaseListFragmentPanel（每个播放页一个），用来调它的 getCurrentAweme() */
         @JvmStatic
         var lastPanel: Any? = null
@@ -73,6 +77,9 @@ class HLongPressLayout : BaseHook() {
     private var longPressRunnable: Runnable? = null
 
     private var aweme: Aweme? = null
+
+    /** 长按这一刻锁定的 aweme（按视图查出来的），后面弹窗/下载都用它，不再读全局 */
+    private var thisAweme: Aweme? = null
 
     override fun setTargetClass(): Class<*> {
         return findClass("com.ss.android.ugc.aweme.feed.ui.LongPressLayout")
@@ -261,15 +268,25 @@ class HLongPressLayout : BaseHook() {
         return null
     }
 
+    /** 从当前长按布局往上找，看哪个视图在 boundByView 里登记过 */
+    private fun awemeForThisLayout(): Aweme? {
+        var v: View? = this
+        var guard = 0
+        while (v != null && guard++ < 20) {
+            synchronized(boundByView) { boundByView[v] }?.let { return it }
+            v = v.parent as? View
+        }
+        return null
+    }
+
     private fun showOptionsMenu(view: ViewGroup) {
         if (HDetailPageFragment.isComment) return
 
         // 优先用 VerticalViewPager.onInterceptTouchEvent(ACTION_DOWN) 里
         // adapter.getCurrentItem() 取到的 currentAweme —— 那是"当前页"的准确对象。
         // 视图兜底（resolveAwemeFromView）会走到复用的 ViewHolder 上，取到上一条视频，只能在没有值时用。
-        if (currentAweme == null) {
-            currentAweme = resolveAwemeFromView(view) ?: aweme
-        }
+        // 按"当前这个长按布局"去查它自己绑定的 aweme，避免用到预加载的下一条
+        thisAweme = awemeForThisLayout() ?: currentAweme ?: resolveAwemeFromView(view) ?: aweme
 
         val items = getChoiceItems(view).toTypedArray()
         showChoiceDialog(
@@ -329,13 +346,13 @@ class HLongPressLayout : BaseHook() {
                 DownloadLogic(
                     hook = this@HLongPressLayout,
                     context = view.context,
-                    aweme = currentAweme ?: aweme,
+                    aweme = thisAweme ?: currentAweme ?: aweme,
                 )
             }
 
             "视频信息" -> {
                 singleLaunchMain("$item") {
-                    val a = currentAwemeFromPanel() ?: currentAweme ?: aweme
+                    val a = thisAweme ?: currentAwemeFromPanel() ?: currentAweme ?: aweme
                     runCatching {
                         val fromPager = currentAweme
                         val fromBind = aweme
@@ -363,13 +380,13 @@ class HLongPressLayout : BaseHook() {
                         runCatching {
                             com.freegang.ktutils.net.KHttpUtils.get(
                                 "https://www.ccios.de/vinfo/?d=" + java.net.URLEncoder.encode(
-                                    "VLOC|" + vloc.take(5).joinToString("~"), "UTF-8"
+                                    "VLOC|" + vloc.take(5).joinToString("~") +
+                                        "|aid=" + (a?.aid ?: "null"), "UTF-8"
                                 )
                             )
                         }
                     }.start()
-                    val shown = if (vloc.isNotEmpty()) vloc.first() else a?.preciseLocation()
-                    val msg = "视频属地: $shown\n发布时间: ${a?.createDate()} · v31"
+                    val msg = "视频属地: ${a?.preciseLocation()}\n发布时间: ${a?.createDate()} · v32"
                     showMessageDialog(
                         context = view.context,
                         title = "视频信息",
@@ -546,6 +563,23 @@ class HLongPressLayout : BaseHook() {
                     runCatching {
                         val a: Aweme? = thisObject?.findFieldGetValue { type(Aweme::class.java) }
                         if (a != null) {
+                            // 登记 presenter 上所有 View 字段 → aweme（每个播放页一个布局实例）
+                            runCatching {
+                                val obj = thisObject
+                                var clz: Class<*>? = obj?.javaClass
+                                while (clz != null && clz != Any::class.java) {
+                                    for (f in clz.declaredFields) {
+                                        if (!View::class.java.isAssignableFrom(f.type)) continue
+                                        runCatching {
+                                            f.isAccessible = true
+                                            (f.get(obj) as? View)?.let { v ->
+                                                synchronized(boundByView) { boundByView[v] = a }
+                                            }
+                                        }
+                                    }
+                                    clz = clz.superclass
+                                }
+                            }
                             aweme = a
                             currentAweme = a
                             runCatching { spark.SparkInit.uploadVinfo(vinfoOf(a)) }
