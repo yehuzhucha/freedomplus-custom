@@ -296,8 +296,7 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
 
         if (lat != 0.0 && lng != 0.0) {
             val (wlat, wlng) = gcj02ToWgs84(lat, lng)
-            val parts = geoLookup(wlat, wlng)
-            val addr = parts.filter { it.isNotBlank() }.joinToString(" ")
+            val addr = fmtGeo(geoLookupFull(wlat, wlng))
             if (addr.isNotBlank()) {
                 return@withContext if (poiName.isNotEmpty() && !addr.contains(poiName)) "$poiName｜$addr" else addr
             }
@@ -306,8 +305,8 @@ suspend fun Aweme.preciseLocation(): String = withContext(Dispatchers.IO) {
         // 有 POI 名字但没有坐标：拿名字前向地理编码，再反查街道
         if (poiName.isNotEmpty()) {
             forwardGeocode(poiName)?.let { (la, ln) ->
-                val addr = geoLookup(la, ln).filter { it.isNotBlank() }.joinToString(" ")
-                if (addr.isNotBlank()) return@withContext "$poiName｜$addr"
+                val addr = fmtGeo(geoLookupFull(la, ln))
+                if (addr.isNotBlank()) return@withContext if (addr.contains(poiName)) addr else "$poiName｜$addr"
             }
             return@withContext poiName
         }
@@ -333,3 +332,26 @@ fun Aweme.poiDebug(): String = runCatching {
     val ln = numOf(poi, "poiLongitudeGcj02", "poiLongitude", "longitude")
     "name=" + name.ifEmpty { "null" } + ",lat=" + (la ?: "null") + ",lng=" + (ln ?: "null")
 }.getOrElse { "err" }
+
+/** 逆地理完整结果：display 里含最近地标、道路、街道、区、市、省、邮编 */
+private fun geoLookupFull(lat: Double, lng: Double): Map<String, String> = runCatching {
+    val js = KHttpUtils.get("https://www.ccios.de/geo/?lat=$lat&lng=$lng").parseJSON()
+    mapOf(
+        "display" to js.getStringOrDefault("display"),
+        "province" to js.getStringOrDefault("province"),
+        "city" to js.getStringOrDefault("city"),
+        "district" to js.getStringOrDefault("district"),
+        "street" to js.getStringOrDefault("street"),
+        "road" to js.getStringOrDefault("road"),
+        "name" to js.getStringOrDefault("name"),
+        "house" to js.getStringOrDefault("house"),
+    )
+}.getOrElse { emptyMap() }
+
+private fun fmtGeo(m: Map<String, String>): String {
+    val disp = m["display"].orEmpty().trim()
+    if (disp.isNotEmpty()) return disp.replace(", ", " ")
+    return listOf("province", "city", "district", "street", "road", "house", "name")
+        .mapNotNull { k -> m[k]?.takeIf { it.isNotBlank() } }
+        .joinToString(" ")
+}
